@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FlashNote</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css" />
+</head>
+<body>
+  <!-- Navbar -->
+  <nav class="navbar">
+    <a href="/" class="navbar-brand">
+      <span class="icon">📸</span>
+      FlashNote
+    </a>
+    <div class="navbar-actions">
+      <button class="btn-icon" title="Upload files from desktop" onclick="openUploadModal()">↑</button>
+      <button class="btn-icon" title="Upload from phone" onclick="openQR()">📱</button>
+      <button class="theme-toggle" id="theme-btn" onclick="toggleTheme()" title="Switch to dark mode">🌙</button>
+      <a href="/settings-page" class="btn-icon" title="Settings">⚙</a>
+    </div>
+  </nav>
+
+  <!-- Desktop Upload Modal -->
+  <div class="modal-backdrop" id="upload-backdrop" onclick="closeUploadModal()" style="display:none;"></div>
+  <div class="upload-modal" id="upload-modal" style="display:none;">
+    <div class="upload-modal-header">
+      <span>Upload Files</span>
+      <button class="btn-icon" onclick="closeUploadModal()" style="font-size:18px;line-height:1;">×</button>
+    </div>
+    <div class="upload-modal-body">
+      <!-- Drop zone (shown when no files yet) -->
+      <div class="drop-zone" id="desktop-drop-zone">
+        <input type="file" id="desktop-file-input" accept="image/*,.txt" multiple />
+        <div class="drop-zone-icon">📁</div>
+        <div class="drop-zone-label">Drop files here or click to browse</div>
+        <div class="drop-zone-sub">Images (JPG, PNG, WEBP) or .txt notes — select multiple</div>
+      </div>
+      <!-- Thumbnail strip (shown when files selected) -->
+      <div id="desktop-thumb-section" style="display:none;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+          <span style="font-size:12px;font-weight:600;color:var(--text);">Selected files</span>
+          <span id="desktop-file-count" style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:1px 8px;"></span>
+        </div>
+        <div id="desktop-thumb-strip" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;min-height:72px;align-items:center;"></div>
+        <!-- Add more tile -->
+        <div id="desktop-add-tile" style="flex-shrink:0;width:68px;height:68px;border-radius:8px;border:2px dashed var(--accent);background:var(--accent-subtle);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;position:relative;margin-top:4px;">
+          <input type="file" id="desktop-file-input-more" accept="image/*,.txt" multiple style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;" />
+          <span style="font-size:18px;color:var(--accent);">＋</span>
+          <span style="font-size:9px;font-weight:600;color:var(--accent);">Add more</span>
+        </div>
+      </div>
+      <div class="form-group">
+        <label style="font-size:13px;font-weight:500;color:var(--text);">Course <span style="color:var(--danger);">*</span></label>
+        <input class="form-input" type="text" id="desktop-course-input" placeholder="e.g. Agentic AI, System Design…" autocomplete="off" list="desktop-course-suggestions" oninput="checkDesktopReady()" />
+        <datalist id="desktop-course-suggestions"></datalist>
+      </div>
+      <div class="form-group">
+        <label style="font-size:13px;font-weight:500;color:var(--text);">Module <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+        <input class="form-input" type="text" id="desktop-module-input" placeholder="e.g. Module 1, Week 2…" autocomplete="off" />
+      </div>
+      <div class="form-group">
+        <label style="font-size:13px;font-weight:500;color:var(--text);">Your understanding <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
+        <textarea
+          class="form-input"
+          id="desktop-user-notes"
+          placeholder="Write what you understood — key ideas, questions, your own examples…"
+          style="resize:vertical;min-height:80px;line-height:1.5;"
+        ></textarea>
+        <span style="font-size:11px;color:var(--muted);margin-top:4px;display:block;">AI will build on your notes and generate diagrams tailored to your understanding.</span>
+      </div>
+      <div class="form-group">
+        <label style="font-size:13px;font-weight:500;color:var(--text);">Photos per note</label>
+        <div style="display:flex;gap:8px;">
+          <button class="desktop-group-btn active" data-g="1" onclick="setDesktopGroup(1,this)">1 photo<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">1 note each</span></button>
+          <button class="desktop-group-btn" data-g="2" onclick="setDesktopGroup(2,this)">2 photos<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">paired notes</span></button>
+          <button class="desktop-group-btn" data-g="3" onclick="setDesktopGroup(3,this)">3 photos<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">chapter notes</span></button>
+        </div>
+        <span style="font-size:11px;color:var(--muted);margin-top:4px;display:block;" id="desktop-group-hint">Each photo → its own note, processed in order.</span>
+      </div>
+      <div id="desktop-progress" style="display:none;">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px;" id="desktop-progress-label">Uploading…</div>
+        <div style="height:4px;background:var(--border);border-radius:2px;overflow:hidden;">
+          <div id="desktop-progress-fill" style="height:100%;width:0%;background:var(--accent);border-radius:2px;transition:width 0.3s ease;"></div>
+        </div>
+      </div>
+    </div>
+    <div class="upload-modal-footer">
+      <button class="btn btn-ghost" onclick="closeUploadModal()">Cancel</button>
+      <button class="btn btn-primary" id="desktop-upload-btn" onclick="doDesktopUpload()" disabled>↑ Upload & Generate</button>
+    </div>
+  </div>
+
+  <!-- QR Modal -->
+  <div class="modal-backdrop" id="qr-backdrop" onclick="closeQR()" style="display:none;"></div>
+  <div class="qr-modal" id="qr-modal" style="display:none;">
+    <div class="qr-modal-header">
+      <span style="font-size:15px;font-weight:600;">Upload from Phone</span>
+      <button class="btn-icon" onclick="closeQR()" style="font-size:18px;line-height:1;">×</button>
+    </div>
+    <div class="qr-modal-body">
+      <p class="qr-hint">Make sure your phone is on the same WiFi, then scan:</p>
+      <div class="qr-code-wrap">
+        <img id="qr-img" src="/api/qr" alt="QR Code" width="200" height="200" />
+      </div>
+      <div class="qr-url" id="qr-url">loading…</div>
+      <p class="qr-sub">Tap the link or scan to open the upload page on your phone.</p>
+    </div>
+  </div>
+
+  <!-- Status Bar -->
+  <div class="status-bar">
+    <div class="status-bar-left">
+      <div class="status-indicator">
+        <div class="status-dot" id="watcher-dot"></div>
+        <span id="watcher-label">Watcher: checking...</span>
+      </div>
+      <div class="status-stat">Queue: <span id="queue-count">–</span></div>
+      <div class="status-stat">Processing: <span id="processing-count">–</span></div>
+      <button id="approved-chip" onclick="showApprovedInGrid()" style="display:none;background:var(--success-bg,#f0fdf4);color:#16a34a;border:1px solid #bbf7d0;border-radius:20px;font-size:11px;font-weight:600;padding:3px 10px;cursor:pointer;"></button>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <div class="view-toggle">
+        <button class="active" data-view="grid" onclick="setView('grid')">⊞ Grid</button>
+        <button data-view="graph" onclick="setView('graph')">⬡ Graph</button>
+      </div>
+      <button class="btn btn-ghost" onclick="refreshAll()" style="font-size:12px;padding:5px 12px;">↻ Refresh</button>
+    </div>
+  </div>
+
+  <!-- Main Content -->
+  <div class="main-content">
+    <div id="cards-container"></div>
+    <div id="graph-container" class="graph-container">
+      <div class="graph-filters" id="graph-filters">
+        <div class="graph-filter-group">
+          <span class="graph-filter-label">Filter</span>
+          <button class="graph-filter-btn active" data-filter="all" onclick="setGraphFilter('all',null,this)">All</button>
+        </div>
+        <div class="graph-filter-group" id="graph-course-filters"></div>
+        <div class="graph-filter-group" id="graph-module-filters"></div>
+        <div class="graph-legend">
+          <span class="graph-legend-item"><span class="graph-legend-dot note-dot"></span>Note</span>
+          <span class="graph-legend-item"><span class="graph-legend-dot wiki-dot"></span>Wikilink</span>
+        </div>
+      </div>
+      <canvas id="graph-canvas"></canvas>
+      <div id="graph-tooltip" class="graph-tooltip"></div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Hover Preview Popover -->
+  <div id="hover-preview" class="hover-preview"></div>
+
+  <script src="/static/js/utils.js"></script>
+  <script src="/static/js/empty-state.js"></script>
+  <script src="/static/js/graph.js"></script>
+  <script src="/static/js/queue.js"></script>
+</body>
+</html>

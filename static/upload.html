@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Upload Photos — FlashNote</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --accent: #d97757;
+      --accent-hover: #c4623e;
+      --accent-subtle: rgba(217,119,87,0.1);
+      --bg: #fdf6f0;
+      --surface: #ffffff;
+      --border: #e8d8ce;
+      --text: #1c1712;
+      --muted: #8c7b72;
+      --success: #22c55e;
+      --danger: #ef4444;
+      --radius: 14px;
+    }
+
+    html, body { height: 100%; background: var(--bg); font-family: 'Plus Jakarta Sans', -apple-system, sans-serif; color: var(--text); }
+
+    .page {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 28px 16px 80px;
+    }
+
+    /* Header */
+    .header { text-align: center; margin-bottom: 24px; }
+    .header .logo { font-size: 36px; margin-bottom: 8px; }
+    .header h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; }
+    .header p { font-size: 13px; color: var(--muted); margin-top: 4px; }
+
+    .card {
+      width: 100%;
+      max-width: 420px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.06);
+    }
+
+    /* ── Photo queue ── */
+    .photo-queue-label {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .photo-count-badge {
+      font-size: 11px;
+      font-weight: 500;
+      background: var(--accent-subtle);
+      color: var(--accent);
+      border-radius: 20px;
+      padding: 2px 9px;
+    }
+
+    /* Scroll strip of thumbnails */
+    .photo-strip {
+      display: flex;
+      gap: 10px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+      scrollbar-width: none;
+      min-height: 96px;
+      align-items: center;
+    }
+    .photo-strip::-webkit-scrollbar { display: none; }
+
+    /* Empty state inside strip */
+    .strip-empty {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      padding: 12px 0;
+    }
+    .strip-empty .empty-icon { font-size: 28px; }
+
+    /* Individual thumbnail */
+    .thumb-wrap {
+      position: relative;
+      flex-shrink: 0;
+      width: 88px;
+      height: 88px;
+      border-radius: 10px;
+      overflow: visible;
+    }
+    .thumb-wrap img {
+      width: 88px;
+      height: 88px;
+      object-fit: cover;
+      border-radius: 10px;
+      border: 2px solid var(--border);
+      display: block;
+    }
+    .thumb-remove {
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--danger);
+      color: #fff;
+      border: 2px solid var(--surface);
+      font-size: 12px;
+      line-height: 18px;
+      text-align: center;
+      cursor: pointer;
+      font-weight: 700;
+      z-index: 2;
+    }
+    .thumb-num {
+      position: absolute;
+      bottom: 4px;
+      left: 4px;
+      background: rgba(0,0,0,0.5);
+      color: #fff;
+      font-size: 10px;
+      font-weight: 600;
+      border-radius: 4px;
+      padding: 1px 5px;
+    }
+
+    /* Add more button (tile in strip) */
+    .add-tile {
+      flex-shrink: 0;
+      width: 88px;
+      height: 88px;
+      border-radius: 10px;
+      border: 2px dashed var(--accent);
+      background: var(--accent-subtle);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      cursor: pointer;
+      transition: background 0.15s;
+      position: relative;
+    }
+    .add-tile:hover { background: rgba(217,119,87,0.18); }
+    .add-tile input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+    .add-tile .add-icon { font-size: 22px; color: var(--accent); }
+    .add-tile .add-text { font-size: 10px; font-weight: 600; color: var(--accent); }
+
+    /* Big add button when no photos yet */
+    .add-first-btn {
+      width: 100%;
+      padding: 18px;
+      border: 2px dashed var(--border);
+      border-radius: 12px;
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      transition: border-color 0.15s, background 0.15s;
+      position: relative;
+    }
+    .add-first-btn:hover { border-color: var(--accent); background: var(--accent-subtle); }
+    .add-first-btn input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .add-first-btn .btn-icon { font-size: 32px; }
+    .add-first-btn .btn-label { font-size: 14px; font-weight: 600; color: var(--text); }
+    .add-first-btn .btn-sub { font-size: 12px; color: var(--muted); }
+
+    /* Field */
+    .field { display: flex; flex-direction: column; gap: 6px; }
+    .field label { font-size: 13px; font-weight: 500; color: var(--text); }
+    .field input, .field textarea {
+      width: 100%;
+      background: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 14px;
+      font-family: inherit;
+      outline: none;
+    }
+    .field input:focus, .field textarea:focus { border-color: var(--accent); }
+    .field textarea { resize: vertical; min-height: 80px; line-height: 1.5; }
+    .field input::placeholder, .field textarea::placeholder { color: var(--muted); }
+    .field .hint { font-size: 11px; color: var(--muted); }
+
+    /* Upload button */
+    .upload-btn {
+      width: 100%;
+      padding: 15px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.1s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .upload-btn:hover:not(:disabled) { background: var(--accent-hover); }
+    .upload-btn:active:not(:disabled) { transform: scale(0.98); }
+    .upload-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    /* Progress */
+    .progress-wrap { display: none; flex-direction: column; gap: 8px; }
+    .progress-wrap.show { display: flex; }
+    .progress-label { font-size: 12px; color: var(--muted); text-align: center; }
+    .progress-track { width: 100%; height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; }
+    .progress-fill { height: 100%; width: 0%; background: var(--accent); border-radius: 3px; transition: width 0.25s ease; }
+
+    /* Mini per-photo progress */
+    .per-photo-progress {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 140px;
+      overflow-y: auto;
+    }
+    .photo-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+    }
+    .photo-row img { width: 32px; height: 32px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
+    .photo-row-name { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+    .photo-row-status { font-size: 14px; flex-shrink: 0; }
+
+    /* Success */
+    .success-state { display: none; flex-direction: column; align-items: center; gap: 12px; text-align: center; padding: 12px 0; }
+    .success-state.show { display: flex; }
+    .success-icon { font-size: 50px; animation: popIn 0.4s cubic-bezier(0.175,0.885,0.32,1.275); }
+    .success-state h2 { font-size: 18px; font-weight: 700; }
+    .success-state p { font-size: 13px; color: var(--muted); max-width: 280px; line-height: 1.6; }
+    .add-more-btn {
+      padding: 11px 24px;
+      background: transparent;
+      color: var(--accent);
+      border: 1.5px solid var(--accent);
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .add-more-btn:hover { background: var(--accent-subtle); }
+
+    /* Group size buttons */
+    .group-btn {
+      flex: 1;
+      padding: 10px 6px;
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      background: var(--bg);
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text);
+      cursor: pointer;
+      line-height: 1.4;
+      text-align: center;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .group-btn.active {
+      border-color: var(--accent);
+      background: var(--accent-subtle);
+      color: var(--accent);
+    }
+
+    @keyframes popIn {
+      0% { transform: scale(0.5); opacity: 0; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="header">
+      <div class="logo">📸</div>
+      <h1>FlashNote</h1>
+      <p>Add up to 15 photos — each becomes a note</p>
+    </div>
+
+    <div class="card" id="upload-card">
+
+      <!-- Photo queue -->
+      <div>
+        <div class="photo-queue-label">
+          Photos
+          <span class="photo-count-badge" id="count-badge">0 / 15</span>
+        </div>
+      </div>
+
+      <!-- Empty: big add first button -->
+      <div class="add-first-btn" id="add-first-btn">
+        <input type="file" id="file-input-main" accept="image/*" multiple />
+        <div class="btn-icon">📷</div>
+        <div class="btn-label">Tap to add photos</div>
+        <div class="btn-sub">Camera or camera roll — select multiple</div>
+      </div>
+
+      <!-- Filled: thumbnail strip + add-more tile -->
+      <div id="strip-section" style="display:none;">
+        <div class="photo-strip" id="photo-strip">
+          <!-- thumbnails injected here -->
+          <div class="add-tile" id="add-tile">
+            <input type="file" id="file-input-more" accept="image/*" multiple />
+            <div class="add-icon">＋</div>
+            <div class="add-text">Add more</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fields -->
+      <div class="field">
+        <label>Course <span style="color:var(--danger);">*</span></label>
+        <input type="text" id="course-input" placeholder="e.g. Agentic AI, System Design…" autocomplete="off" list="course-suggestions" />
+        <datalist id="course-suggestions"></datalist>
+      </div>
+
+      <div class="field">
+        <label>Module <span style="color:var(--muted);font-weight:400;">(optional)</span></label>
+        <input type="text" id="module-input" placeholder="e.g. Module 1, Week 2…" autocomplete="off" />
+        <span class="hint">Each photo saves as a separate note in this module.</span>
+      </div>
+
+      <div class="field">
+        <label>Your understanding <span style="color:var(--muted);font-weight:400;">(optional)</span></label>
+        <textarea id="user-notes-input" placeholder="Write what you understood — key ideas, questions, examples…"></textarea>
+        <span class="hint">AI builds on your notes and adds diagrams tailored to your understanding.</span>
+      </div>
+
+      <!-- Group size -->
+      <div class="field" id="group-field">
+        <label>Photos per note</label>
+        <div style="display:flex;gap:8px;">
+          <button class="group-btn active" data-g="1" onclick="setGroup(1,this)">1 photo<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">1 note each</span></button>
+          <button class="group-btn" data-g="2" onclick="setGroup(2,this)">2 photos<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">paired notes</span></button>
+          <button class="group-btn" data-g="3" onclick="setGroup(3,this)">3 photos<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">chapter notes</span></button>
+        </div>
+        <span class="hint" id="group-hint">Each photo → its own note, processed in order.</span>
+      </div>
+
+      <!-- Progress -->
+      <div class="progress-wrap" id="progress-wrap">
+        <div class="progress-label" id="progress-label">Uploading…</div>
+        <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+        <div class="per-photo-progress" id="per-photo-progress"></div>
+      </div>
+
+      <!-- Upload -->
+      <button class="upload-btn" id="upload-btn" onclick="doUpload()" disabled>
+        <span>↑</span> <span id="upload-btn-label">Upload & Generate Notes</span>
+      </button>
+
+      <!-- Success -->
+      <div class="success-state" id="success-state">
+        <div class="success-icon">✅</div>
+        <h2 id="success-title">Notes queued!</h2>
+        <p id="success-msg">Your photos are being processed. Check FlashNote on your Mac to review.</p>
+        <button class="add-more-btn" onclick="resetForm()">Upload more photos</button>
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    const MAX_PHOTOS = 15;
+    let queue = []; // [{file, objectUrl}]
+    let groupSize = 1;
+
+    const groupHints = {
+      1: 'Each photo → its own note, processed in order.',
+      2: 'Every 2 consecutive photos → 1 combined note.',
+      3: 'Every 3 consecutive photos → 1 rich chapter note.',
+    };
+
+    function setGroup(n, btn) {
+      groupSize = n;
+      document.querySelectorAll('.group-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('group-hint').textContent = groupHints[n];
+      updateUploadLabel();
+    }
+
+    function updateUploadLabel() {
+      const n = queue.length;
+      if (n === 0) { document.getElementById('upload-btn-label').textContent = 'Upload & Generate Notes'; return; }
+      const notes = Math.ceil(n / groupSize);
+      document.getElementById('upload-btn-label').textContent =
+        `Upload & Generate ${notes} Note${notes > 1 ? 's' : ''}`;
+    }
+
+    // ─── Load course suggestions ───
+    async function loadCourses() {
+      try {
+        const res = await fetch('/api/courses');
+        const courses = await res.json();
+        const dl = document.getElementById('course-suggestions');
+        dl.innerHTML = courses.map(c => `<option value="${c.course_name}"></option>`).join('');
+      } catch {}
+    }
+
+    // ─── Add files to queue ───
+    function addFiles(fileList) {
+      const remaining = MAX_PHOTOS - queue.length;
+      const toAdd = Array.from(fileList).slice(0, remaining);
+      toAdd.forEach(f => queue.push({ file: f, objectUrl: URL.createObjectURL(f) }));
+      renderStrip();
+      checkReady();
+    }
+
+    // ─── Render thumbnail strip ───
+    function renderStrip() {
+      const strip = document.getElementById('photo-strip');
+      const addTile = document.getElementById('add-tile');
+      const addFirst = document.getElementById('add-first-btn');
+      const stripSection = document.getElementById('strip-section');
+
+      if (queue.length === 0) {
+        addFirst.style.display = '';
+        stripSection.style.display = 'none';
+      } else {
+        addFirst.style.display = 'none';
+        stripSection.style.display = '';
+      }
+
+      // Remove old thumbs (keep add-tile)
+      strip.querySelectorAll('.thumb-wrap').forEach(el => el.remove());
+
+      // Insert thumbs before add-tile
+      queue.forEach((item, i) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'thumb-wrap';
+        wrap.innerHTML = `
+          <img src="${item.objectUrl}" alt="photo ${i+1}" />
+          <div class="thumb-num">${i + 1}</div>
+          <div class="thumb-remove" data-index="${i}">✕</div>
+        `;
+        wrap.querySelector('.thumb-remove').addEventListener('click', (e) => {
+          e.stopPropagation();
+          URL.revokeObjectURL(queue[i].objectUrl);
+          queue.splice(i, 1);
+          renderStrip();
+          checkReady();
+        });
+        strip.insertBefore(wrap, addTile);
+      });
+
+      // Hide add-tile when at max
+      addTile.style.display = queue.length >= MAX_PHOTOS ? 'none' : '';
+
+      // Update badge
+      document.getElementById('count-badge').textContent = `${queue.length} / ${MAX_PHOTOS}`;
+      updateUploadLabel();
+    }
+
+    // ─── File inputs ───
+    document.getElementById('file-input-main').addEventListener('change', e => {
+      addFiles(e.target.files);
+      e.target.value = '';
+    });
+    document.getElementById('file-input-more').addEventListener('change', e => {
+      addFiles(e.target.files);
+      e.target.value = '';
+    });
+
+    function checkReady() {
+      const course = document.getElementById('course-input').value.trim();
+      document.getElementById('upload-btn').disabled = !(queue.length > 0 && course);
+    }
+    document.getElementById('course-input').addEventListener('input', checkReady);
+
+    // ─── Upload ───
+    async function doUpload() {
+      const course = document.getElementById('course-input').value.trim();
+      const module = document.getElementById('module-input').value.trim();
+      const userNotes = document.getElementById('user-notes-input').value.trim();
+      if (!queue.length || !course) return;
+
+      const expectedNotes = Math.ceil(queue.length / groupSize);
+
+      // UI → loading
+      document.getElementById('upload-btn').style.display = 'none';
+      document.getElementById('add-first-btn').style.display = 'none';
+      document.getElementById('strip-section').style.display = 'none';
+      document.getElementById('progress-wrap').classList.add('show');
+
+      const fill = document.getElementById('progress-fill');
+      const label = document.getElementById('progress-label');
+      const perPhoto = document.getElementById('per-photo-progress');
+
+      // Build per-group rows
+      perPhoto.innerHTML = '';
+      for (let i = 0; i < queue.length; i += groupSize) {
+        const group = queue.slice(i, i + groupSize);
+        const noteNum = Math.floor(i / groupSize) + 1;
+        const row = document.createElement('div');
+        row.className = 'photo-row';
+        row.id = `row-${noteNum}`;
+        row.innerHTML = `
+          <img src="${group[0].objectUrl}" />
+          <span class="photo-row-name">Note ${noteNum}${group.length > 1 ? ` (${group.length} photos)` : ''}</span>
+          <span class="photo-row-status" id="status-${noteNum}">⏳</span>`;
+        perPhoto.appendChild(row);
+      }
+
+      // Send all files in one request — backend groups by group_size
+      label.textContent = `Uploading ${queue.length} photo${queue.length > 1 ? 's' : ''}…`;
+      fill.style.width = '20%';
+
+      const form = new FormData();
+      queue.forEach(item => form.append('files', item.file));
+      form.append('course_name', course);
+      form.append('module_name', module);
+      form.append('group_size', groupSize);
+      if (userNotes) form.append('user_notes', userNotes);
+
+      // Animate progress while waiting
+      let pct = 20;
+      const ticker = setInterval(() => {
+        pct = Math.min(pct + (88 - pct) * 0.06, 88);
+        fill.style.width = pct + '%';
+      }, 300);
+
+      let success = false;
+      let noteCount = 0;
+      try {
+        const res = await fetch('/api/upload', { method: 'POST', body: form });
+        clearInterval(ticker);
+        if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Upload failed'); }
+        const data = await res.json();
+        noteCount = data.count || 1;
+        success = true;
+        fill.style.width = '100%';
+        // Mark all rows as queued
+        document.querySelectorAll('[id^="status-"]').forEach(el => el.textContent = '✅');
+      } catch (err) {
+        clearInterval(ticker);
+        document.querySelectorAll('[id^="status-"]').forEach(el => el.textContent = '❌');
+        label.textContent = 'Upload failed: ' + err.message;
+      }
+
+      await new Promise(r => setTimeout(r, 500));
+      document.getElementById('progress-wrap').classList.remove('show');
+
+      if (success) {
+        document.getElementById('success-title').textContent =
+          noteCount === 1 ? 'Note queued!' : `${noteCount} notes queued!`;
+        document.getElementById('success-msg').textContent =
+          `${queue.length} photo${queue.length > 1 ? 's' : ''} → ${noteCount} note${noteCount > 1 ? 's' : ''} being processed. Check FlashNote on your Mac to review.`;
+        document.getElementById('success-state').classList.add('show');
+      } else {
+        // Re-show form for retry
+        document.getElementById('upload-btn').style.display = '';
+        document.getElementById('upload-btn').disabled = false;
+        if (queue.length > 0) document.getElementById('strip-section').style.display = '';
+      }
+    }
+
+    // ─── Reset ───
+    function resetForm() {
+      queue.forEach(item => URL.revokeObjectURL(item.objectUrl));
+      queue = [];
+      document.getElementById('course-input').value = '';
+      document.getElementById('module-input').value = '';
+      document.getElementById('user-notes-input').value = '';
+      document.getElementById('success-state').classList.remove('show');
+      document.getElementById('upload-btn').style.display = '';
+      document.getElementById('upload-btn').disabled = true;
+      document.getElementById('progress-fill').style.width = '0%';
+      document.getElementById('per-photo-progress').innerHTML = '';
+      renderStrip();
+    }
+
+    loadCourses();
+    renderStrip();
+  </script>
+</body>
+</html>

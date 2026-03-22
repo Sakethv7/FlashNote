@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Review Note — FlashNote</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="/static/js/utils.js"></script>
+</head>
+<body>
+  <!-- Navbar -->
+  <nav class="navbar">
+    <div style="display:flex;align-items:center;gap:16px;">
+      <a href="/" class="navbar-back">← Back to Queue</a>
+      <div style="width:1px;height:20px;background:var(--border);"></div>
+      <input
+        id="nav-title"
+        type="text"
+        value="Loading..."
+        title="Click to rename"
+        style="
+          font-size:14px;font-weight:600;color:var(--text);
+          border:none;outline:none;background:transparent;
+          max-width:360px;min-width:80px;width:auto;
+          cursor:text;border-radius:6px;padding:2px 6px;
+          transition:background 0.15s,box-shadow 0.15s;
+        "
+        onfocus="this.style.background='var(--bg)';this.style.boxShadow='0 0 0 2px var(--accent)';"
+        onblur="this.style.background='transparent';this.style.boxShadow='none';saveTitle(this.value);"
+        onkeydown="if(event.key==='Enter'||event.key==='Escape'){this.blur();}"
+      />
+      <span id="nav-course-badge" class="badge badge-course" style="display:none;"></span>
+    </div>
+    <div class="navbar-actions">
+      <span id="note-status-badge" class="badge"></span>
+      <button class="theme-toggle" id="theme-btn" onclick="toggleTheme()" title="Switch to dark mode">🌙</button>
+    </div>
+  </nav>
+
+  <!-- Review Layout -->
+  <div class="review-layout">
+
+    <!-- Sidebar -->
+    <div class="review-sidebar">
+
+      <!-- Actions -->
+      <div class="review-sidebar-section">
+        <h4>Actions</h4>
+        <div class="action-buttons" style="flex-direction:column;">
+          <button class="btn btn-primary" id="approve-btn" onclick="approve()">
+            ✓ Approve & Save
+          </button>
+          <button class="btn btn-secondary" id="regenerate-btn" onclick="regenerate()">
+            ↺ Regenerate
+          </button>
+          <button class="btn btn-danger" id="reject-btn" onclick="reject()">
+            ✗ Reject
+          </button>
+        </div>
+      </div>
+
+      <!-- Expansion Level -->
+      <div class="review-sidebar-section">
+        <h4>Expansion Level</h4>
+        <select class="expansion-selector" id="expansion-select">
+          <option value="brief">Brief (200–400 words)</option>
+          <option value="detailed" selected>Detailed (500–800 words)</option>
+          <option value="deep dive">Deep Dive (800+ words)</option>
+        </select>
+        <p style="font-size:11px;color:var(--muted);margin-top:6px;">Used for Regenerate</p>
+      </div>
+
+      <!-- Reflection Scores -->
+      <div class="review-sidebar-section" id="scores-section" style="display:none;">
+        <h4>AI Quality Scores</h4>
+        <div class="scores-container" id="scores-container"></div>
+      </div>
+
+      <!-- Note Info -->
+      <div class="review-sidebar-section" id="info-section">
+        <h4>Note Info</h4>
+        <div style="display:flex;flex-direction:column;gap:8px;font-size:12px;color:var(--muted);">
+          <div style="display:flex;flex-direction:column;gap:4px;">
+            <label for="course-input" style="color:var(--muted);">Course</label>
+            <input
+              id="course-input"
+              type="text"
+              placeholder="e.g. Agentic AI"
+              style="
+                font-size:12px;font-family:inherit;
+                border:1px solid var(--border);border-radius:6px;
+                padding:5px 8px;background:var(--bg);color:var(--text);outline:none;
+                transition:border-color 0.15s;
+              "
+              onfocus="this.style.borderColor='var(--accent)'"
+              onblur="this.style.borderColor='var(--border)';saveCourse(this.value)"
+              onkeydown="if(event.key==='Enter'||event.key==='Escape')this.blur()"
+            />
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px;">
+            <label for="module-input" style="color:var(--muted);">Module</label>
+            <input
+              id="module-input"
+              type="text"
+              placeholder="e.g. Module 1"
+              style="
+                font-size:12px;font-family:inherit;
+                border:1px solid var(--border);border-radius:6px;
+                padding:5px 8px;background:var(--bg);color:var(--text);outline:none;
+                transition:border-color 0.15s;
+              "
+              onfocus="this.style.borderColor='var(--accent)'"
+              onblur="this.style.borderColor='var(--border)';saveModule(this.value)"
+              onkeydown="if(event.key==='Enter'||event.key==='Escape')this.blur()"
+            />
+          </div>
+          <div>Loop count: <span id="info-loops" style="color:var(--text);">–</span></div>
+          <div>Images: <span id="info-images" style="color:var(--text);">–</span></div>
+          <div>Timestamp: <span id="info-timestamp" style="color:var(--text);">–</span></div>
+        </div>
+      </div>
+
+      <!-- Search Queries -->
+      <div class="review-sidebar-section" id="search-section" style="display:none;">
+        <h4>Web Searches Used</h4>
+        <ul id="search-queries-list" style="font-size:12px;color:var(--muted);padding-left:16px;"></ul>
+      </div>
+
+    </div>
+
+    <!-- Main Editor + Preview -->
+    <div class="review-main" style="position:relative;">
+      <!-- Processing overlay -->
+      <div class="processing-overlay" id="processing-overlay" style="display:none;">
+        <div class="spinner"></div>
+        <div class="processing-text">Processing note...</div>
+        <div style="font-size:12px;color:var(--muted);">This may take 30–60 seconds</div>
+      </div>
+
+      <!-- Editor Panel -->
+      <div class="editor-panel">
+        <div class="panel-header">
+          <span>Markdown Editor</span>
+          <span class="save-indicator" id="save-indicator">Saved ✓</span>
+        </div>
+        <textarea
+          class="editor-textarea"
+          id="markdown-editor"
+          placeholder="Note content will appear here once processing is complete..."
+          spellcheck="false"
+        ></textarea>
+      </div>
+
+      <!-- Preview Panel -->
+      <div class="preview-panel">
+        <div class="panel-header">
+          <span>Rendered Preview</span>
+          <span style="font-size:11px;color:var(--muted);">Obsidian-style</span>
+        </div>
+        <div class="preview-content" id="markdown-preview">
+          <p style="color:var(--muted);">Preview will appear here...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <script src="/static/js/review.js"></script>
+</body>
+</html>

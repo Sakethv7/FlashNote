@@ -1,0 +1,25 @@
+# Environment & secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Runtime data
+queue.json
+config.json
+courses.json
+uploads/
+screenshots/
+vault/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+nohup.out

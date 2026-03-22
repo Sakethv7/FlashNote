@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Settings — FlashNote</title>
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <style>
+    .settings-layout { max-width: 640px; margin: 0 auto; padding: 32px 24px; }
+    .settings-layout h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
+    .settings-layout .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+
+    .settings-section { margin-bottom: 24px; }
+    .settings-section-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--muted);
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      margin-bottom: 16px;
+    }
+    .field:last-child { margin-bottom: 0; }
+
+    .field label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .field input, .field select {
+      display: block;
+      width: 100%;
+      background-color: var(--bg);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 9px 12px;
+      font-size: 13px;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .field input:focus, .field select:focus { border-color: var(--info); }
+    .field input[type="number"] { max-width: 160px; }
+
+    .field .hint {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .field .hint code {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 11px;
+    }
+
+    .settings-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding-top: 8px;
+    }
+
+    .course-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .course-card-header {
+      font-weight: 600;
+      font-size: 14px;
+      margin-bottom: 12px;
+      color: var(--text);
+    }
+    .course-card .field-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .course-card .field label {
+      display: block;
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
+    .course-card .field input,
+    .course-card .field select {
+      display: block;
+      width: 100%;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 8px 10px;
+      font-size: 13px;
+      font-family: inherit;
+      box-sizing: border-box;
+    }
+    .course-card-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: flex-end;
+      margin-top: 8px;
+    }
+    .btn-add-course {
+      display: block;
+      width: 100%;
+      padding: 10px;
+      background: var(--highlight);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+    .btn-save-course {
+      padding: 6px 14px;
+      background: var(--highlight);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-delete-course {
+      padding: 6px 14px;
+      background: transparent;
+      color: var(--danger);
+      border: 1px solid var(--danger);
+      border-radius: var(--radius);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .env-notice {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .env-notice-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .env-key {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--text);
+    }
+    .env-status {
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .env-status.set   { color: var(--success); }
+    .env-status.unset { color: var(--danger); }
+  </style>
+</head>
+<body>
+  <nav class="navbar">
+    <div style="display:flex;align-items:center;gap:14px;">
+      <a href="/" class="navbar-back">← Back to Queue</a>
+      <span style="width:1px;height:18px;background:var(--border);display:inline-block;"></span>
+      <span style="font-size:14px;font-weight:600;">Settings</span>
+    </div>
+  </nav>
+
+  <div class="settings-layout">
+    <h1>⚙ Settings</h1>
+    <p class="subtitle">Configure your FlashNote app. Changes take effect immediately.</p>
+
+    <!-- API Keys -->
+    <div class="settings-section">
+      <div class="settings-section-title">🔑 API Keys</div>
+      <div class="env-notice">
+        <div class="env-notice-row">
+          <span class="env-key">ANTHROPIC_API_KEY</span>
+          <span class="env-status" id="anthropic-status">checking…</span>
+        </div>
+        <div class="env-notice-row">
+          <span class="env-key">TAVILY_API_KEY</span>
+          <span class="env-status" id="tavily-status">checking…</span>
+        </div>
+        <p class="hint" style="margin-top:10px;">
+          API keys are loaded from your <code>.env</code> file in the app directory. Edit that file to add or change keys — no restart needed.
+        </p>
+      </div>
+    </div>
+
+    <!-- Courses -->
+    <div class="settings-section">
+      <div class="settings-section-title">📚 Courses</div>
+      <section>
+        <p class="section-desc" style="font-size:13px;color:var(--muted);margin-bottom:12px;">Each course maps a folder to a set of note settings. Drop screenshots into a course folder to generate notes.</p>
+        <div id="courses-list"></div>
+        <button class="btn-add-course" onclick="addCourse()">+ Add Course</button>
+      </section>
+    </div>
+
+    <!-- Vault Path -->
+    <div class="settings-section">
+      <div class="settings-section-title">📁 Vault Path</div>
+
+      <div class="field">
+        <label for="vault-path">Obsidian Vault Path</label>
+        <input type="text" id="vault-path" placeholder="/path/to/your/obsidian/vault" />
+        <span class="hint">Approved notes are saved under <code>{course}/</code> directly inside this folder.</span>
+      </div>
+    </div>
+
+    <!-- Note Generation -->
+    <div class="settings-section">
+      <div class="settings-section-title">📝 Note Generation</div>
+
+      <div class="field">
+        <label for="expansion-level">Default Expansion Level</label>
+        <select id="expansion-level">
+          <option value="brief">Brief — 200–400 words, quick summaries</option>
+          <option value="detailed">Detailed — 500–800 words, balanced coverage</option>
+          <option value="deep dive">Deep Dive — 800+ words, comprehensive notes</option>
+        </select>
+        <span class="hint">Controls how detailed the generated notes are. You can override this per-note in the review view.</span>
+      </div>
+    </div>
+
+    <!-- Server -->
+    <div class="settings-section">
+      <div class="settings-section-title">🌐 Server</div>
+
+      <div class="field">
+        <label for="port">Port</label>
+        <input type="number" id="port" placeholder="8765" min="1024" max="65535" />
+        <span class="hint">Port for the local web server. Restart the app for port changes to take effect.</span>
+      </div>
+    </div>
+
+    <!-- Save -->
+    <div class="settings-footer">
+      <a href="/" class="btn btn-ghost">Cancel</a>
+      <button class="btn btn-primary" id="save-btn" onclick="saveSettings()">Save Settings</button>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+  <script src="/static/js/utils.js"></script>
+  <script src="/static/js/settings.js"></script>
+</body>
+</html>
