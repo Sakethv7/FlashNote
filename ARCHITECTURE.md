@@ -96,9 +96,13 @@
 - Each search targets one uncertainty from step 1
 - Output: `search_results[]`, `search_queries[]`
 
-### 3. `visual_generator` — Claude Haiku
-- Designs mermaid diagram ideas suited to the content type
-  - Flowcharts for processes, sequence diagrams for protocols, mind maps for concepts
+### 3. `visual_generator` — Claude Sonnet
+- Generates 1–2 Mermaid diagrams suited to the content
+  - Prefers `flowchart TD` / `flowchart LR` — most reliable in Obsidian
+  - NEVER uses `mindmap` (known Obsidian rendering failure)
+  - Node labels: alphanumeric + spaces only; no colons, brackets, or special chars
+  - Max 12 nodes per diagram
+- Post-processes diagrams through `_sanitize_mermaid()` to strip invisible Unicode and fix common issues
 - Output: `visuals[]` (mermaid code blocks)
 
 ### 4. `draft_writer` — Claude Haiku (1st pass) / Sonnet (retry)
@@ -221,3 +225,27 @@ Filters: All / per-course / per-module — built dynamically from note metadata.
 **Why group_size?** A single lecture photo might miss context visible on the next slide. Grouping 2–3 consecutive photos lets Claude see continuity without manually stitching notes.
 
 **Why wikilinks?** Obsidian's graph becomes useful only when notes are densely linked. Scoring wikilink density during reflection incentivises the model to produce notes that actually connect to the knowledge graph.
+
+**Do agents communicate during self-review?** Yes. The `reflector` scores the draft and attaches a `feedback` string + `gaps[]` list (each gap has a `found` abbreviation and a `correction` explanation). The `draft_writer` reads these on the retry pass and explicitly incorporates them via a `REVISION REQUIRED` block in its prompt. This is **sequential, within-note communication** — one note at a time, not parallel agents.
+
+**How many agents are there?** 6 nodes in the LangGraph state machine — `intake_extractor`, `uncertainty_searcher`, `visual_generator`, `draft_writer`, `reflector`, `finalize`. They run sequentially on the same `NoteState`. The Tavily step uses a `ThreadPoolExecutor` to fan out 3 searches in parallel, but those are I/O calls, not separate AI agents. Multiple notes process concurrently via Python threads (staggered 20 s apart to stay under the 30k token/min rate limit).
+
+---
+
+## Rate Limiting
+
+Claude Sonnet has a 30,000 input-token/minute limit on the API. Two safeguards:
+
+1. **Per-call backoff** (`_claude_text`): exponential retry on `rate_limit` / `overloaded` errors — waits 15 s, 30 s, 60 s, 120 s, 240 s before giving up.
+2. **Bulk stagger**: when regenerating many notes at once, each pipeline starts 20 s after the previous one.
+
+---
+
+## Obsidian Compatibility
+
+Two common failures fixed in the pipeline:
+
+| Issue | Root cause | Fix |
+|---|---|---|
+| YAML parsed as code block | Claude sometimes wraps frontmatter in ` ```yaml ` fences | `_strip_yaml_fence()` in `nodes.py` strips the fence and ensures raw `---` delimiters |
+| Mermaid diagram breaks | Colons / brackets / invisible Unicode in node labels | `_sanitize_mermaid()` cleans each diagram; `_resanitize_mermaid_in_draft()` re-cleans after embedding |

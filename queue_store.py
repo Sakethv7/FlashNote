@@ -42,8 +42,27 @@ class QueueStore:
             self._store.pop(note_id, None)
             self._save()
 
+    def batch_update(self, updates: dict[str, dict]):
+        """Apply multiple note updates in a single disk write."""
+        with self._lock:
+            for note_id, fields in updates.items():
+                if note_id in self._store:
+                    self._store[note_id].update(fields)
+            self._save()
+
     def list_all(self) -> list[dict]:
         with self._lock:
             return list(self._store.values())
+
+    def filter(self, course_name: str | None = None, module_name: str | None = None,
+               status: str | None = None) -> list[dict]:
+        """Return notes matching all supplied filters (None = any)."""
+        with self._lock:
+            return [
+                n for n in self._store.values()
+                if (course_name is None or n.get("course_name") == course_name)
+                and (module_name is None or n.get("module_name") == module_name)
+                and (status is None or n.get("status") == status)
+            ]
 
 queue_store = QueueStore()

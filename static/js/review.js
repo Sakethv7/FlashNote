@@ -250,11 +250,11 @@ async function approve() {
 }
 
 async function reject() {
-  if (!confirm('Reject this note? It will remain in the queue but marked as rejected.')) return;
+  if (!confirm('Delete this note? It will be permanently removed from the queue.')) return;
   try {
     const res = await fetch(`/api/queue/${noteId}/reject`, { method: 'POST' });
-    if (!res.ok) throw new Error('Failed to reject');
-    showToast('Note rejected', 'info');
+    if (!res.ok) throw new Error('Failed to delete');
+    showToast('Note deleted', 'info');
     updateStatusBadge('rejected');
     setTimeout(() => window.location.href = '/', 1000);
   } catch (err) {

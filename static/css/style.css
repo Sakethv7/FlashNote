@@ -487,6 +487,40 @@ a:hover {
 }
 .ft-note-row:hover .ft-note-open { opacity: 1; }
 
+.ft-approve, .ft-regen, .ft-trash {
+  background: none;
+  border: none;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 5px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.1s, background 0.1s;
+  line-height: 1;
+  flex-shrink: 0;
+}
+.ft-approve { color: #2a7a4b; font-weight: 700; }
+.ft-approve:hover { background: rgba(42,122,75,0.12); }
+.ft-regen { color: var(--accent); }
+.ft-regen:hover { background: var(--accent-subtle); }
+.ft-trash:hover { background: rgba(220,50,50,0.1); }
+.ft-note-row:hover .ft-approve,
+.ft-note-row:hover .ft-regen,
+.ft-note-row:hover .ft-trash { opacity: 1; }
+.ft-row-approve, .ft-row-regen, .ft-row-trash { font-size: 12px; }
+.ft-course-row:hover .ft-row-approve,
+.ft-course-row:hover .ft-row-regen,
+.ft-course-row:hover .ft-row-trash,
+.ft-module-row:hover .ft-row-approve,
+.ft-module-row:hover .ft-row-regen,
+.ft-module-row:hover .ft-row-trash { opacity: 0.6; }
+.ft-course-row .ft-row-approve:hover,
+.ft-course-row .ft-row-regen:hover,
+.ft-course-row .ft-row-trash:hover,
+.ft-module-row .ft-row-approve:hover,
+.ft-module-row .ft-row-regen:hover,
+.ft-module-row .ft-row-trash:hover { opacity: 1 !important; }
+
 /* Collapse */
 .ft-course.closed > .ft-children,
 .ft-module.closed > .ft-children { display: none; }

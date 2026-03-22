@@ -341,12 +341,45 @@ function renderNoteRow(note) {
 
   const statusDot = { approved: '🟢', in_review: '🟡', processing: '🔵', rejected: '🔴' }[note.status] || '⚪';
 
+  const canApprove = note.status === 'in_review';
   row.innerHTML = `
     <span class="ft-note-icon">${statusDot}</span>
     <span class="ft-note-title">${escapeHtml(note.title || 'Untitled')}</span>
     <span class="ft-note-time">${formatRelativeTimestamp(note.timestamp)}</span>
     <a href="/review/${note.note_id}" class="ft-note-open" title="Open">→</a>
+    ${canApprove ? `<button class="ft-approve" title="Approve & save to Obsidian" onclick="event.stopPropagation()">✓</button>` : ''}
+    <button class="ft-regen" title="Regenerate note" onclick="event.stopPropagation()">↻</button>
+    <button class="ft-trash" title="Delete note" onclick="event.stopPropagation()">🗑</button>
   `;
+
+  if (canApprove) {
+    row.querySelector('.ft-approve').addEventListener('click', async e => {
+      e.stopPropagation();
+      const btn = e.currentTarget;
+      btn.textContent = '…'; btn.disabled = true;
+      await fetch(`/api/queue/${note.note_id}/approve`, { method: 'POST',
+        headers: {'Content-Type':'application/json'}, body: '{}' });
+      lastQueueData = null; fetchQueue();
+    });
+  }
+
+  row.querySelector('.ft-regen').addEventListener('click', async e => {
+    e.stopPropagation();
+    const btn = e.currentTarget;
+    btn.textContent = '…'; btn.disabled = true;
+    await fetch(`/api/queue/${note.note_id}/regenerate`, { method: 'POST',
+      headers: {'Content-Type':'application/json'}, body: '{}' });
+    lastQueueData = null; fetchQueue();
+    btn.textContent = '↻'; btn.disabled = false;
+  });
+
+  row.querySelector('.ft-trash').addEventListener('click', async e => {
+    e.stopPropagation();
+    if (!confirm(`Delete "${note.title || 'Untitled'}"?`)) return;
+    await fetch(`/api/queue/${note.note_id}`, { method: 'DELETE' });
+    lastQueueData = null;
+    fetchQueue();
+  });
 
   // Hover preview
   row.addEventListener('mouseenter', () => {
@@ -354,13 +387,53 @@ function renderNoteRow(note) {
   });
   row.addEventListener('mouseleave', () => { clearTimeout(hoverTimeout); hidePreview(); });
 
-  // Click row to open review
+  // Click row to open review — ignore clicks on any action button/link
   row.addEventListener('click', e => {
-    if (e.target.classList.contains('ft-note-open')) return;
+    if (e.target.closest('.ft-approve, .ft-regen, .ft-trash, .ft-note-open')) return;
     window.location.href = `/review/${note.note_id}`;
   });
 
   return row;
+}
+
+// Shared bulk action helper — all three bulk operations use this
+async function _bulkAction({ endpoint, method = 'POST', confirmMsg, successMsg, btn, course, module }) {
+  if (!confirm(confirmMsg)) return;
+  const original = btn.textContent;
+  btn.textContent = '…'; btn.disabled = true;
+  const params = new URLSearchParams();
+  if (course) params.set('course_name', course);
+  if (module !== undefined) params.set('module_name', module);
+  try {
+    const res = await fetch(`${endpoint}?${params}`, { method });
+    const data = await res.json();
+    showToast(successMsg(data), 'success');
+    lastQueueData = null;
+    fetchQueue();
+  } finally {
+    btn.textContent = original; btn.disabled = false;
+  }
+}
+
+function deleteBulk(course, module, label, btn) {
+  _bulkAction({ endpoint: '/api/queue/bulk', method: 'DELETE',
+    confirmMsg: `Delete all notes in "${label}"?`,
+    successMsg: d => `Deleted ${d.count ?? '?'} note${d.count !== 1 ? 's' : ''}`,
+    btn, course, module });
+}
+
+function approveBulk(course, module, label, btn) {
+  _bulkAction({ endpoint: '/api/queue/bulk/approve', method: 'POST',
+    confirmMsg: `Approve & save all in-review notes in "${label}" to Obsidian?`,
+    successMsg: d => `Approved ${d.approved} note${d.approved !== 1 ? 's' : ''} → Obsidian`,
+    btn, course, module });
+}
+
+function regenBulk(course, module, label, btn) {
+  _bulkAction({ endpoint: '/api/queue/bulk/regenerate', method: 'POST',
+    confirmMsg: `Regenerate all notes in "${label}"? This re-runs the full AI pipeline.`,
+    successMsg: d => `Regenerating ${d.count} note${d.count !== 1 ? 's' : ''}…`,
+    btn, course, module });
 }
 
 function startInlineRename(titleEl, noteId) {
@@ -477,7 +550,13 @@ async function fetchQueue() {
         <span class="ft-icon">📚</span>
         <span class="ft-name">${escapeHtml(course)}</span>
         <span class="ft-badge">${totalNotes}</span>
+        <button class="ft-approve ft-row-approve" title="Approve all in this course">✓</button>
+        <button class="ft-regen ft-row-regen" title="Regenerate all in this course">↻</button>
+        <button class="ft-trash ft-row-trash" title="Delete all in this course">🗑</button>
       `;
+      courseRow.querySelector('.ft-approve').addEventListener('click', e => { e.stopPropagation(); approveBulk(course, undefined, course, e.currentTarget); });
+      courseRow.querySelector('.ft-regen').addEventListener('click', e => { e.stopPropagation(); regenBulk(course, undefined, course, e.currentTarget); });
+      courseRow.querySelector('.ft-trash').addEventListener('click', e => { e.stopPropagation(); deleteBulk(course, undefined, course, e.currentTarget); });
       const courseChildren = document.createElement('div');
       courseChildren.className = 'ft-children';
       courseRow.addEventListener('click', () => {
@@ -503,7 +582,13 @@ async function fetchQueue() {
             <span class="ft-icon">📂</span>
             <span class="ft-name">${escapeHtml(mod)}</span>
             <span class="ft-badge">${modNotes.length}</span>
+            <button class="ft-approve ft-row-approve" title="Approve all in this module">✓</button>
+            <button class="ft-regen ft-row-regen" title="Regenerate all in this module">↻</button>
+            <button class="ft-trash ft-row-trash" title="Delete all in this module">🗑</button>
           `;
+          modRow.querySelector('.ft-approve').addEventListener('click', e => { e.stopPropagation(); approveBulk(course, mod, mod, e.currentTarget); });
+          modRow.querySelector('.ft-regen').addEventListener('click', e => { e.stopPropagation(); regenBulk(course, mod, mod, e.currentTarget); });
+          modRow.querySelector('.ft-trash').addEventListener('click', e => { e.stopPropagation(); deleteBulk(course, mod, mod, e.currentTarget); });
           const modChildren = document.createElement('div');
           modChildren.className = 'ft-children';
           modRow.addEventListener('click', e => {

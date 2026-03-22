@@ -34,14 +34,23 @@ app = FastAPI(title="FlashNote App")
 STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-# On startup: recover any notes stuck in "processing" from a previous crashed run
+# On startup: recover any notes stuck in "processing" from a previous crashed run,
+# and purge stale "rejected" notes left over from before rejection-as-delete was implemented.
 @app.on_event("startup")
 async def recover_stuck_notes():
     from queue_store import queue_store
+    to_delete = []
     for note in queue_store.list_all():
         if note.get("status") == "processing":
             new_status = "in_review" if note.get("draft_markdown", "").strip() else "rejected"
             queue_store.update(note["note_id"], {"status": new_status})
+        elif note.get("status") == "rejected":
+            # Old rejected notes are no longer useful — remove them on startup
+            to_delete.append(note["note_id"])
+    for note_id in to_delete:
+        queue_store.remove(note_id)
+    if to_delete:
+        print(f"[startup] Purged {len(to_delete)} stale rejected note(s) from queue.")
 
 # Cache HTML files at startup — they don't change at runtime
 _HTML_CACHE = {
@@ -198,7 +207,15 @@ async def upload_photo(
 @app.get("/api/queue")
 async def list_queue():
     import re as _re
-    notes = queue_store.list_all()
+    # Deduplicate by note_id (shouldn't happen but guards against corrupted store)
+    seen: set[str] = set()
+    unique = []
+    for n in queue_store.list_all():
+        nid = n.get("note_id")
+        if nid and nid not in seen:
+            seen.add(nid)
+            unique.append(n)
+    notes = unique
 
     def extract_wikilinks(md: str) -> list[str]:
         return list(dict.fromkeys(_re.findall(r'\[\[([^\]]+)\]\]', md or '')))
@@ -251,57 +268,123 @@ class ApproveBody(BaseModel):
     markdown: Optional[str] = None
 
 
+def _save_note_to_vault(note: dict, final_md: str) -> Path:
+    """Write a note's markdown + assets to the Obsidian vault. Returns the note path."""
+    course = note.get("course_name", "General")
+    module = note.get("module_name", "").strip()
+    vault = Path(settings.obsidian_vault_path)
+    note_dir = vault / course / module if module else vault / course
+    assets_dir = note_dir / "assets"
+    note_dir.mkdir(parents=True, exist_ok=True)
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    for img_path in note.get("image_paths", []):
+        src = Path(img_path)
+        try:
+            shutil.copy2(str(src), str(assets_dir / src.name))
+        except FileNotFoundError:
+            print(f"Image missing, skipping: {img_path}")
+        final_md = final_md.replace(f"![[{src.name}]]", f"![[assets/{src.name}]]")
+    title = note.get("title", "untitled").replace("/", "-").replace("\\", "-")[:80]
+    note_path = note_dir / f"{title}.md"
+    note_path.write_text(final_md)
+    return note_path
+
+
+# ── Bulk routes MUST come before /{note_id} routes or FastAPI matches "bulk" as a note_id ──
+
+@app.post("/api/queue/bulk/approve")
+async def approve_bulk(course_name: str = None, module_name: str = None):
+    """Approve all in_review notes matching course and/or module. Single disk write at end."""
+    notes = queue_store.filter(course_name=course_name, module_name=module_name, status="in_review")
+    approved, failed = 0, 0
+    status_updates: dict[str, dict] = {}
+    for note in notes:
+        try:
+            _save_note_to_vault(note, note.get("draft_markdown", ""))
+            status_updates[note["note_id"]] = {"status": "approved"}
+            approved += 1
+        except Exception as e:
+            print(f"Bulk approve failed for {note.get('note_id')}: {e}")
+            failed += 1
+    if status_updates:
+        queue_store.batch_update(status_updates)
+    return {"status": "done", "approved": approved, "failed": failed}
+
+
+@app.delete("/api/queue/bulk")
+async def delete_bulk(course_name: str = None, module_name: str = None):
+    """Delete all notes matching course and/or module."""
+    notes = queue_store.filter(course_name=course_name, module_name=module_name)
+    for note in notes:
+        queue_store.remove(note["note_id"])
+    return {"status": "deleted", "count": len(notes)}
+
+
+class RegenerateBody(BaseModel):
+    expansion_level: Optional[str] = None
+
+
+@app.post("/api/queue/bulk/regenerate")
+async def regenerate_bulk(course_name: str = None, module_name: str = None):
+    """Re-run the pipeline for all notes matching course and/or module."""
+    import threading
+    from pipeline import graph
+
+    matched = queue_store.filter(course_name=course_name, module_name=module_name)
+
+    # Mark all as processing in one disk write
+    queue_store.batch_update({n["note_id"]: {
+        "status": "processing", "loop_count": 1,
+        "reflection_scores": None, "draft_markdown": "",
+    } for n in matched})
+
+    def _regen(note):
+        note_id = note["note_id"]
+        result = graph.invoke(queue_store.get(note_id))
+        queue_store.update(note_id, {
+            "draft_markdown": result.get("draft_markdown", ""),
+            "title": result.get("title", note.get("title")),
+            "reflection_scores": result.get("reflection_scores"),
+            "loop_count": result.get("loop_count", 0),
+            "status": "in_review",
+        })
+
+    import time
+    for i, note in enumerate(matched):
+        # Stagger starts by 20s per note to stay under 30k tokens/min rate limit
+        delay = i * 20
+        def _start(n=note, d=delay):
+            if d: time.sleep(d)
+            _regen(n)
+        threading.Thread(target=_start, daemon=True).start()
+
+    return {"status": "processing", "count": len(matched)}
+
+
+# ── Per-note routes ──
+
 @app.post("/api/queue/{note_id}/approve")
 async def approve_note(note_id: str, body: ApproveBody = None):
     note = queue_store.get(note_id)
     if not note:
         raise HTTPException(status_code=404, detail="Note not found")
-
-    final_md = (body.markdown if body and body.markdown else note.get("draft_markdown", ""))
-
-    course = note.get("course_name", "General")
-    module = note.get("module_name", "").strip()
-    vault = Path(settings.obsidian_vault_path)
-
-    # Path: vault/Course/Module/note.md  (module is optional)
-    note_dir = vault / course / module if module else vault / course
-    assets_dir = note_dir / "assets"
-    note_dir.mkdir(parents=True, exist_ok=True)
-    assets_dir.mkdir(parents=True, exist_ok=True)
-
-    # Copy images to vault assets
-    for img_path in note.get("image_paths", []):
-        src = Path(img_path)
-        if src.exists():
-            dest = assets_dir / src.name
-            shutil.copy2(str(src), str(dest))
-
-    # Update image embed paths in markdown to be relative
-    for img_path in note.get("image_paths", []):
-        img_name = Path(img_path).name
-        final_md = final_md.replace(f"![[{img_name}]]", f"![[assets/{img_name}]]")
-
-    # Write the note
-    title = note.get("title", "untitled").replace("/", "-").replace("\\", "-")[:80]
-    note_filename = f"{title}.md"
-    note_path = note_dir / note_filename
-    note_path.write_text(final_md)
-
+    final_md = body.markdown if body and body.markdown else note.get("draft_markdown", "")
+    note_path = _save_note_to_vault(note, final_md)
     queue_store.update(note_id, {"status": "approved"})
     return {"status": "approved", "path": str(note_path)}
 
 
-@app.post("/api/queue/{note_id}/reject")
-async def reject_note(note_id: str):
-    note = queue_store.get(note_id)
-    if not note:
+@app.delete("/api/queue/{note_id}")
+async def delete_note(note_id: str):
+    """Hard-delete a single note from the queue."""
+    if not queue_store.get(note_id):
         raise HTTPException(status_code=404, detail="Note not found")
-    queue_store.update(note_id, {"status": "rejected"})
-    return {"status": "rejected"}
+    queue_store.remove(note_id)
+    return {"status": "deleted"}
 
 
-class RegenerateBody(BaseModel):
-    expansion_level: Optional[str] = None
+# reject is an alias for delete
+app.post("/api/queue/{note_id}/reject")(delete_note)
 
 
 @app.post("/api/queue/{note_id}/regenerate")
@@ -314,15 +397,13 @@ async def regenerate_note(note_id: str, body: RegenerateBody = None):
     from pipeline import graph
 
     expansion = (body.expansion_level if body and body.expansion_level else note.get("expansion_level", "detailed"))
-
-    updates = {
+    queue_store.update(note_id, {
         "status": "processing",
         "expansion_level": expansion,
-        "loop_count": 1,   # skip Haiku draft; go straight to Sonnet on regenerate
+        "loop_count": 1,
         "reflection_scores": None,
         "draft_markdown": "",
-    }
-    queue_store.update(note_id, updates)
+    })
 
     def run():
         current = queue_store.get(note_id)

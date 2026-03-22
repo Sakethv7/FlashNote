@@ -158,19 +158,31 @@ def _parse_json_response(text: str, fallback: dict) -> dict:
 
 
 def _claude_text(prompt: str, max_tokens: int = 2000, images: list[str] | None = None, model: str = CLAUDE_SONNET) -> str:
-    """Single-turn Claude call. Optionally attach image paths."""
+    """Single-turn Claude call with exponential backoff on rate limits."""
+    import time
     content = []
     for path in (images or []):
         data, media_type = _encode_image(path)
         content.append({"type": "image", "source": {"type": "base64", "media_type": media_type, "data": data}})
     content.append({"type": "text", "text": prompt})
 
-    response = _get_claude().messages.create(
-        model=model,
-        max_tokens=max_tokens,
-        messages=[{"role": "user", "content": content}]
-    )
-    return response.content[0].text
+    for attempt in range(5):
+        try:
+            response = _get_claude().messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                messages=[{"role": "user", "content": content}]
+            )
+            return response.content[0].text
+        except Exception as e:
+            msg = str(e)
+            if "rate_limit" in msg or "529" in msg or "overloaded" in msg.lower():
+                wait = 2 ** attempt * 15  # 15s, 30s, 60s, 120s, 240s
+                print(f"Rate limit hit, retrying in {wait}s (attempt {attempt+1}/5)…")
+                time.sleep(wait)
+            else:
+                raise
+    raise RuntimeError("Claude rate limit: max retries exceeded")
 
 
 # ─────────────────────────────────────────────
