@@ -22,7 +22,6 @@ async function loadSettings() {
     setEnvStatus('anthropic-status', data.anthropic_api_key_set, 'ANTHROPIC_API_KEY');
     setEnvStatus('tavily-status',    data.tavily_api_key_set,    'TAVILY_API_KEY');
 
-    document.getElementById('vault-path').value = data.obsidian_vault_path || '';
     document.getElementById('expansion-level').value = data.default_expansion_level || 'detailed';
     document.getElementById('port').value = data.port || 8765;
 
@@ -35,14 +34,12 @@ async function loadSettings() {
 async function saveSettings() {
   const saveBtn = document.getElementById('save-btn');
   saveBtn.disabled = true;
-  saveBtn.textContent = 'Saving...';
+  saveBtn.textContent = 'Saving…';
 
   const updates = {};
-  const vaultPath = document.getElementById('vault-path').value.trim();
   const expansionLevel = document.getElementById('expansion-level').value;
   const port = parseInt(document.getElementById('port').value, 10);
 
-  if (vaultPath) updates.obsidian_vault_path = vaultPath;
   if (expansionLevel) updates.default_expansion_level = expansionLevel;
   if (!isNaN(port) && port > 1023 && port < 65536) updates.port = port;
 
@@ -53,14 +50,41 @@ async function saveSettings() {
       body: JSON.stringify(updates)
     });
     if (!res.ok) throw new Error('Save failed');
-    showToast('Settings saved successfully!', 'success');
-    setTimeout(() => loadSettings(), 500);
+    showToast('Settings saved!', 'success');
+
+    setTimeout(() => loadSettings(), 400);
   } catch (err) {
     showToast('Failed to save settings', 'error');
     console.error(err);
   } finally {
     saveBtn.disabled = false;
     saveBtn.textContent = 'Save Settings';
+  }
+}
+
+async function resyncVault() {
+  const btn = document.getElementById('resync-btn');
+  const result = document.getElementById('resync-result');
+  btn.disabled = true; btn.textContent = '↻ Re-syncing…';
+  result.style.display = 'none';
+  try {
+    const res = await fetch('/api/vault/resync', { method: 'POST' });
+    const data = await res.json();
+    result.style.display = 'block';
+    if (data.failed === 0) {
+      result.style.color = 'var(--success)';
+      result.textContent = `✓ Re-synced ${data.resynced} note${data.resynced !== 1 ? 's' : ''} to vault.`;
+    } else {
+      result.style.color = 'var(--warning)';
+      result.textContent = `${data.resynced} synced, ${data.failed} failed. Check console for details.`;
+      console.error('Resync errors:', data.errors);
+    }
+    showToast(`Re-synced ${data.resynced} notes to vault`, 'success');
+  } catch (err) {
+    result.style.display = 'block'; result.style.color = 'var(--danger)';
+    result.textContent = 'Re-sync failed. Is the server running?';
+  } finally {
+    btn.disabled = false; btn.textContent = '↻ Re-sync All Approved Notes → Vault';
   }
 }
 
@@ -129,7 +153,7 @@ async function addCourse() {
     const res = await fetch('/api/courses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ course_name: 'New Course', folder_path: '', expansion_level: 'detailed', tags: [] })
+      body: JSON.stringify({ course_name: 'New Course', folder_path: '', expansion_level: 'detailed', tags: [], vault_path: '' })
     });
     if (!res.ok) {
       const e = await res.json();
@@ -148,7 +172,6 @@ async function saveCourse(id) {
   const folder = document.getElementById('folder-' + id).value;
   const expansion = document.getElementById('expansion-' + id).value;
   const tags = document.getElementById('tags-' + id).value.split(',').map(t => t.trim()).filter(Boolean);
-
   try {
     const res = await fetch('/api/courses/' + id, {
       method: 'PUT',
