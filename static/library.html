@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Library — FlashNote</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/css/style.css" />
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: false, theme: 'base', themeVariables: { primaryColor: '#d97757', primaryTextColor: '#3a3028', lineColor: '#a08070', edgeLabelBackground: '#faf6f0' } });</script>
+  <script src="/static/js/utils.js"></script>
+</head>
+<body>
+  <!-- Navbar -->
+  <nav class="navbar">
+    <div style="display:flex;align-items:center;gap:16px;">
+      <a href="/" class="navbar-brand">
+        <span class="icon">📸</span> FlashNote
+      </a>
+      <div style="width:1px;height:20px;background:var(--border);"></div>
+      <span style="font-size:13px;font-weight:600;color:var(--muted);">Library</span>
+    </div>
+    <div class="navbar-actions">
+      <a href="/" class="btn-icon" title="Queue">⊞</a>
+      <button class="theme-toggle" id="theme-btn" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+      <a href="/settings-page" class="btn-icon" title="Settings">⚙</a>
+    </div>
+  </nav>
+
+  <!-- Library Layout -->
+  <div class="lib-layout">
+
+    <!-- Sidebar -->
+    <aside class="lib-sidebar">
+      <div class="lib-sidebar-inner">
+        <!-- Search -->
+        <div class="lib-search-wrap">
+          <input id="lib-search" class="lib-search" type="text" placeholder="Search notes…" oninput="onLibSearch(this.value)" />
+        </div>
+
+        <!-- Course tree -->
+        <nav id="lib-tree" class="lib-tree"></nav>
+      </div>
+    </aside>
+
+    <!-- Main reader -->
+    <main class="lib-main">
+      <!-- Empty state: recent notes grid -->
+      <div id="lib-empty" class="lib-empty">
+        <div class="lib-empty-heading">Jump back in</div>
+        <div id="lib-recent-grid" class="lib-recent-grid"></div>
+      </div>
+
+      <!-- Note reader (hidden until a note is selected) -->
+      <div id="lib-reader" style="display:none;">
+        <div class="lib-reader-inner">
+          <div class="lib-breadcrumb" id="lib-breadcrumb"></div>
+
+          <div class="lib-note-header">
+            <h1 id="lib-note-title"></h1>
+            <div class="lib-note-meta" id="lib-note-meta"></div>
+          </div>
+
+          <!-- Thumbnail strip -->
+          <div id="lib-thumbs" class="lib-thumbs"></div>
+
+          <!-- Rendered markdown -->
+          <div id="lib-content" class="lib-content"></div>
+
+          <!-- Footer: prev/next + edit link -->
+          <div class="lib-footer">
+            <div class="lib-nav-btns">
+              <button id="lib-prev-btn" class="btn btn-ghost lib-nav-btn" onclick="navigateRelative(-1)" disabled>← Prev</button>
+              <button id="lib-next-btn" class="btn btn-ghost lib-nav-btn" onclick="navigateRelative(1)" disabled>Next →</button>
+            </div>
+            <a id="lib-edit-link" href="#" class="btn btn-ghost lib-edit-btn">✎ Edit in review</a>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="toast-container" id="toast-container"></div>
+  <script src="/static/js/library.js"></script>
+</body>
+</html>

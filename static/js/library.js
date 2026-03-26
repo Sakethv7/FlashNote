@@ -209,32 +209,60 @@ async function openNote(noteId) {
 
 // ── Markdown rendering ────────────────────────────────────────────────────────
 function renderContent(md) {
-  // Strip YAML frontmatter if present
+  // Strip YAML frontmatter
   md = md.replace(/^---[\s\S]*?---\n?/, '');
-
-  // Strip ![[image]] Obsidian embeds FIRST (before wikilink conversion eats the brackets)
+  // Strip Obsidian image embeds
   md = md.replace(/!\[\[[^\]]+\]\]\s*/g, '');
 
-  // Convert [[wikilinks]] → clickable spans (show label only, no brackets)
-  md = md.replace(/\[\[([^\]]+)\]\]/g, (_, label) =>
-    `<span class="lib-wikilink" onclick="navigateWikilink('${escHtml(label).replace(/'/g, "\\'")}'" title="Go to: ${escHtml(label)}">${escHtml(label)}</span>`
-  );
-
-  const html = marked.parse(md);
+  // Parse markdown FIRST — wikilinks stay as [[text]] so marked can correctly
+  // identify code fences and other blocks without injected HTML breaking parsing
   const container = document.getElementById('lib-content');
-  container.innerHTML = html;
+  container.innerHTML = marked.parse(md);
 
-  // Render mermaid blocks
-  container.querySelectorAll('code.language-mermaid, pre code').forEach(el => {
+  // Replace [[wikilinks]] in DOM text nodes only, skipping <pre> and <code>
+  _replaceWikilinksInDOM(container);
+
+  // Render mermaid blocks using explicit render() API — avoids race conditions
+  const mermaidEls = [...container.querySelectorAll('code.language-mermaid, pre code')].filter(el =>
+    el.textContent.trim().match(/^(graph|flowchart|sequenceDiagram|classDiagram|gantt|pie|stateDiagram|erDiagram|journey|gitGraph)/i)
+  );
+  mermaidEls.forEach((el, i) => {
     const text = el.textContent.trim();
-    if (!text.match(/^(graph|flowchart|sequenceDiagram|classDiagram|gantt|pie|stateDiagram|erDiagram|journey|gitGraph)/i)) return;
-    const wrapper = document.createElement('div');
-    wrapper.className = 'lib-mermaid';
-    wrapper.textContent = text;
-    el.closest('pre')?.replaceWith(wrapper) ?? el.replaceWith(wrapper);
+    const pre = el.closest('pre');
+    const placeholder = document.createElement('div');
+    placeholder.className = 'lib-mermaid-wrap';
+    pre ? pre.replaceWith(placeholder) : el.replaceWith(placeholder);
+    mermaid.render('mermaid-diag-' + Date.now() + '-' + i, text)
+      .then(({ svg }) => { placeholder.innerHTML = svg; })
+      .catch(err => {
+        placeholder.innerHTML = `<pre style="color:#c44;font-size:11px;padding:8px">${text.slice(0,120)}</pre>`;
+        console.warn('[mermaid]', err.message);
+      });
   });
-  mermaid.run({ nodes: container.querySelectorAll('.lib-mermaid') }).catch(err => {
-    console.warn('[mermaid] render error:', err);
+}
+
+function _replaceWikilinksInDOM(container) {
+  // Walk all text nodes, skip anything inside <pre> or <code>
+  const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      let el = node.parentElement;
+      while (el && el !== container) {
+        if (el.tagName === 'PRE' || el.tagName === 'CODE') return NodeFilter.FILTER_REJECT;
+        el = el.parentElement;
+      }
+      return node.textContent.includes('[[') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+    }
+  });
+  const textNodes = [];
+  let n;
+  while ((n = walker.nextNode())) textNodes.push(n);
+  textNodes.forEach(textNode => {
+    const span = document.createElement('span');
+    span.innerHTML = textNode.textContent.replace(/\[\[([^\]]+)\]\]/g, (_, label) => {
+      const safe = label.replace(/'/g, "\\'");
+      return `<span class="lib-wikilink" onclick="navigateWikilink('${safe}')" title="Go to: ${escHtml(label)}">${escHtml(label)}</span>`;
+    });
+    textNode.parentNode.replaceChild(span, textNode);
   });
 }
 
