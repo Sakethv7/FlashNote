@@ -74,9 +74,16 @@ function renderTree(notes) {
     return;
   }
 
+  // Figure out which course+module the current note lives in (to auto-expand it)
+  const activeNote = allNotes.find(n => n.note_id === currentNoteId);
+  const activeCourse = activeNote?.course_name || null;
+  const activeMod    = activeNote?.module_name || null;
+
   for (const [course, modules] of Object.entries(tree)) {
     const courseEl = document.createElement('div');
-    courseEl.className = 'lib-course';
+    const isCourseActive = course === activeCourse;
+    // Collapsed by default; expand only if it contains the current note or search is active
+    courseEl.className = 'lib-course' + (isCourseActive || q ? '' : ' collapsed');
 
     const courseHeader = document.createElement('button');
     courseHeader.className = 'lib-course-header';
@@ -92,7 +99,9 @@ function renderTree(notes) {
     for (const [mod, noteList] of Object.entries(modules)) {
       if (mod) {
         const modEl = document.createElement('div');
-        modEl.className = 'lib-module';
+        const isModActive = isCourseActive && mod === activeMod;
+        // Collapse modules too unless it's the active one or search active
+        modEl.className = 'lib-module' + (isModActive || q ? '' : ' collapsed');
 
         const modHeader = document.createElement('button');
         modHeader.className = 'lib-module-header';
