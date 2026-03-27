@@ -457,11 +457,11 @@ async def smart_merge_notes(course_name: str = None, module_name: str = None):
     import anthropic as _ant, json as _json, threading
 
     pool = [n for n in queue_store.filter(course_name=course_name, module_name=module_name)
-            if n.get("status") in ("in_review", "pending")
+            if n.get("status") in ("in_review", "pending", "approved")
             and n.get("draft_markdown")]
 
     if len(pool) < 2:
-        return {"status": "skipped", "message": "Need at least 2 processed notes to merge."}
+        return {"status": "skipped", "message": "Need at least 2 notes with content to merge."}
 
     target_groups = max(1, len(pool) // 3)
 
