@@ -322,10 +322,20 @@ function openLightbox(noteId, idx, total) {
   document.body.style.overflow = 'hidden';
   err.style.display = 'none';
   img.style.display = 'block';
-  img.src = `/api/image-raw/${noteId}?idx=${idx}`;
+  img.src = `/api/image-raw/${noteId}?idx=${idx}&t=${Date.now()}`;
   img.onerror = () => { img.style.display = 'none'; err.style.display = 'block'; };
-  cap.textContent = total > 1 ? `Source ${idx + 1} of ${total}` : 'Source image';
+  cap.textContent = total > 1 ? `${idx + 1} / ${total}` : 'Source image';
+  const prev = document.getElementById('lib-lb-prev');
+  const next = document.getElementById('lib-lb-next');
+  if (prev) prev.style.opacity = idx > 0 ? '1' : '0.2';
+  if (next) next.style.opacity = idx < total - 1 ? '1' : '0.2';
   document.addEventListener('keydown', _lbKeyHandler);
+}
+
+function lbNav(delta) {
+  const newIdx = _lbIdx + delta;
+  if (newIdx < 0 || newIdx >= _lbTotal) return;
+  openLightbox(_lbNoteId, newIdx, _lbTotal);
 }
 
 function closeLightbox() {
@@ -337,8 +347,8 @@ function closeLightbox() {
 
 function _lbKeyHandler(e) {
   if (e.key === 'Escape')      closeLightbox();
-  if (e.key === 'ArrowRight' && _lbIdx < _lbTotal - 1) openLightbox(_lbNoteId, _lbIdx + 1, _lbTotal);
-  if (e.key === 'ArrowLeft'  && _lbIdx > 0)             openLightbox(_lbNoteId, _lbIdx - 1, _lbTotal);
+  if (e.key === 'ArrowRight')  lbNav(1);
+  if (e.key === 'ArrowLeft')   lbNav(-1);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
