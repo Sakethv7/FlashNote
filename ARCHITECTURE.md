@@ -15,12 +15,17 @@
                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                     FastAPI  (api.py)                           │
-│                     localhost:8765                              │
+│              dev: localhost:8766 / main: localhost:8765         │
 │                                                                 │
-│  POST /api/upload   →  save files, group by group_size          │
-│  GET  /api/queue    →  list notes with status + wikilinks       │
-│  PUT  /api/approve  →  write to Obsidian vault                  │
-│  PUT  /api/settings →  save config.json live                    │
+│  POST /api/upload             →  save files, group by mode      │
+│  POST /api/suggest-placement  →  Claude Haiku reads images,     │
+│                                  returns best course + module   │
+│  GET  /api/library            →  approved notes for library UI  │
+│  GET  /api/queue              →  list notes with status         │
+│  PUT  /api/approve            →  write to Obsidian vault        │
+│  POST /api/queue/consolidate  →  LLM dedup + merge              │
+│  POST /api/queue/smart-order  →  LLM reorder by topic logic     │
+│  PUT  /api/settings           →  save config.json live          │
 └───────────────────────────┬─────────────────────────────────────┘
                             │
                     process_images()
@@ -213,6 +218,47 @@ The graph visualises **two node types**:
 Edges connect notes to the wikilinks they contain. Wikilinks shared across multiple notes become **hubs** — surfacing conceptual overlap between topics. This mirrors Obsidian's graph view.
 
 Filters: All / per-course / per-module — built dynamically from note metadata.
+
+---
+
+## Upload — Auto-detect Placement
+
+When the user adds images to the upload form, a **✦ Auto-detect** button appears. Clicking it:
+
+1. Sends up to 3 images (resized to 512px for cost) to `POST /api/suggest-placement`
+2. The endpoint builds a `course → [modules]` map from all approved notes
+3. Sends images + structure to Claude Haiku with the prompt: *"which existing course and module do these best fit?"*
+4. Returns `{ course, module, reason }` — form fields are auto-filled
+
+Cost: one Claude Haiku call (~500 input tokens + image). Falls back gracefully if no existing notes.
+
+---
+
+## Library View
+
+The library (`/library`) is a **read-only folder explorer**:
+
+- Left sidebar: Course → Module tree, all collapsed by default
+- Active course/module (based on current note) auto-expands on load
+- Search expands all matching nodes
+- Sidebar can be toggled with the ◀/▶ button (state persists via localStorage)
+- Main panel: note reader with breadcrumb, prev/next nav, source image lightbox
+
+---
+
+## Queue Post-Processing
+
+Each course/module row in the queue tree exposes 5 actions (visible on hover):
+
+| Button | Function | Cost |
+|---|---|---|
+| 🔀 Consolidate | Claude reviews all notes for redundancy; merges duplicates, deletes redundant ones | API call |
+| 🗂 Smart Order | Claude suggests optimal reading order; updates `sequence` field | API call |
+| ✓ Approve all | Bulk approve → writes to Obsidian vault | Free |
+| ↻ Regen | Re-runs full pipeline on all notes in scope | API calls |
+| 🗑 Delete | Removes notes from queue | Free |
+
+Note: Smart Merge (⊕) was removed — it overlapped with Consolidate. Consolidate is more capable (works on approved notes, can delete pure duplicates).
 
 ---
 

@@ -19,11 +19,14 @@
 
 - **Phone upload via QR code** — scan once, shoot up to 15 photos per session
 - **Desktop upload modal** — drag-and-drop images or `.txt` notes
-- **Group photos per note** — choose 1 / 2 / 3 photos per note to cover multi-page topics
+- **Auto-detect course & module** — tap ✦ Auto-detect at upload time; Claude Haiku looks at your images and fills in the right course + module from your existing structure
+- **Course & module autocomplete** — typing in the upload form shows your existing phases/modules as suggestions (local, zero cost)
+- **Group photos per note** — choose 1 / 2 / 3 photos per note, or Smart Group (AI) to auto-cluster by topic
 - **Your understanding field** — add your own notes at upload time; AI builds on them
 - **AI quality loop** — draft is scored on Accuracy, Completeness, Wikilink Density; regenerates with Claude Sonnet if score is low
+- **Library view** — folder-style tree (Course → Module → notes), all collapsed by default; collapsible sidebar with ◀/▶ toggle
+- **Queue post-processing** — per course/module: Consolidate duplicates (🔀), Smart Order (🗂), Approve all (✓), Regen (↻), Delete (🗑)
 - **Graph view** — Obsidian-style force-directed graph showing notes AND wikilinks as nodes, filterable by course/module
-- **File tree view** — notes organised as Course → Module → note rows (collapsible)
 - **Dark mode** — Claude/Anthropic colour palette with smooth transitions
 - **Obsidian sync** — proper YAML frontmatter, `[[wikilinks]]`, mermaid diagrams, assets embedded
 
@@ -58,7 +61,7 @@ TAVILY_API_KEY=your_key_here         # required — tavily.com (free tier works)
 python main.py
 ```
 
-Opens at `http://localhost:8765`. Scan the QR code on your phone to upload photos wirelessly.
+Opens at `http://localhost:8766` (dev) or `http://localhost:8765` (main/stable). Scan the QR code on your phone to upload photos wirelessly.
 
 ---
 
@@ -106,9 +109,18 @@ FlashNote/
 | `obsidian_vault_path` | `./vault` | Where approved notes are saved |
 | `watched_folder` | `./screenshots` | Folder watched for auto-ingestion |
 | `default_expansion_level` | `detailed` | `brief` / `detailed` / `deep dive` |
-| `port` | `8765` | Local server port |
+| `port` | `8766` (dev) / `8765` (main) | Fixed ports — dev and main never share a port |
 
 Settings are changed live via the web UI — no restart needed.
+
+### Dev / Main port convention
+
+| Branch | Port | Purpose |
+|---|---|---|
+| `dev` | **8766** | Active development — all new features land here first |
+| `main` | **8765** | Stable — only updated when `dev` is fully tested |
+
+Ports are fixed (no random fallback). If the port is in use, the server exits with a clear error.
 
 ---
 
