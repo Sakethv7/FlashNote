@@ -4,6 +4,22 @@ let allNotes = [];      // full list from /api/library
 let currentNoteId = null;
 let searchQuery = '';
 
+// ── Sidebar toggle ────────────────────────────────────────────────────────────
+function toggleLibSidebar() {
+  const sidebar = document.querySelector('.lib-sidebar');
+  const btn = document.getElementById('lib-sidebar-toggle');
+  const collapsed = sidebar.classList.toggle('collapsed');
+  btn.textContent = collapsed ? '▶' : '◀';
+  localStorage.setItem('lib-sidebar-collapsed', collapsed ? '1' : '0');
+}
+
+function initLibSidebar() {
+  if (localStorage.getItem('lib-sidebar-collapsed') === '1') {
+    document.querySelector('.lib-sidebar').classList.add('collapsed');
+    document.getElementById('lib-sidebar-toggle').textContent = '▶';
+  }
+}
+
 // Course color palette — matches graph.js COURSE_PALETTE
 const COURSE_COLORS = ['#d97757','#c4673f','#a85432','#e8956d','#8b6f5e','#6b4f40','#b8816a','#d4a898'];
 const _courseColorCache = {};
@@ -19,6 +35,7 @@ function getCourseColor(course) {
 // ── Init ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   initTheme();
+  initLibSidebar();
   mermaid.initialize({ startOnLoad: false, theme: document.documentElement.dataset.theme === 'dark' ? 'dark' : 'default', securityLevel: 'loose' });
 
   const hash = location.hash.slice(1);
@@ -74,9 +91,16 @@ function renderTree(notes) {
     return;
   }
 
+  // Figure out which course+module the current note lives in (to auto-expand it)
+  const activeNote = allNotes.find(n => n.note_id === currentNoteId);
+  const activeCourse = activeNote?.course_name || null;
+  const activeMod    = activeNote?.module_name || null;
+
   for (const [course, modules] of Object.entries(tree)) {
     const courseEl = document.createElement('div');
-    courseEl.className = 'lib-course';
+    const isCourseActive = course === activeCourse;
+    // Collapsed by default; expand only if it contains the current note or search is active
+    courseEl.className = 'lib-course' + (isCourseActive || q ? '' : ' collapsed');
 
     const courseHeader = document.createElement('button');
     courseHeader.className = 'lib-course-header';
@@ -92,7 +116,9 @@ function renderTree(notes) {
     for (const [mod, noteList] of Object.entries(modules)) {
       if (mod) {
         const modEl = document.createElement('div');
-        modEl.className = 'lib-module';
+        const isModActive = isCourseActive && mod === activeMod;
+        // Collapse modules too unless it's the active one or search active
+        modEl.className = 'lib-module' + (isModActive || q ? '' : ' collapsed');
 
         const modHeader = document.createElement('button');
         modHeader.className = 'lib-module-header';
@@ -309,6 +335,49 @@ function onLibSearch(val) {
 }
 
 
+// ── Lightbox ──────────────────────────────────────────────────────────────────
+let _lbNoteId = null, _lbIdx = 0, _lbTotal = 0;
+
+function openLightbox(noteId, idx, total) {
+  _lbNoteId = noteId; _lbIdx = idx; _lbTotal = total;
+  const lb  = document.getElementById('lib-lightbox');
+  const img = document.getElementById('lib-lightbox-img');
+  const err = document.getElementById('lib-lightbox-error');
+  const cap = document.getElementById('lib-lightbox-caption');
+  lb.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  err.style.display = 'none';
+  img.style.display = 'block';
+  img.src = `/api/image-raw/${noteId}?idx=${idx}&t=${Date.now()}`;
+  img.onerror = () => { img.style.display = 'none'; err.style.display = 'block'; };
+  cap.textContent = total > 1 ? `${idx + 1} / ${total}` : 'Source image';
+  const prev = document.getElementById('lib-lb-prev');
+  const next = document.getElementById('lib-lb-next');
+  if (prev) prev.style.opacity = idx > 0 ? '1' : '0.2';
+  if (next) next.style.opacity = idx < total - 1 ? '1' : '0.2';
+  document.addEventListener('keydown', _lbKeyHandler);
+}
+
+function lbNav(delta) {
+  const newIdx = _lbIdx + delta;
+  if (newIdx < 0 || newIdx >= _lbTotal) return;
+  openLightbox(_lbNoteId, newIdx, _lbTotal);
+}
+
+function closeLightbox() {
+  document.getElementById('lib-lightbox').style.display = 'none';
+  document.body.style.overflow = '';
+  document.getElementById('lib-lightbox-img').src = '';
+  document.removeEventListener('keydown', _lbKeyHandler);
+}
+
+function _lbKeyHandler(e) {
+  if (e.key === 'Escape')      closeLightbox();
+  if (e.key === 'ArrowRight')  lbNav(1);
+  if (e.key === 'ArrowLeft')   lbNav(-1);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }

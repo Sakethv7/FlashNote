@@ -1,55 +1,34 @@
 # FlashNote
 
-> Local-first AI note processing. Drop screenshots → get structured, searchable notes — reviewed and read entirely in-app.
+> AI-powered note-taking that turns your photos and screenshots into structured, Obsidian-ready markdown notes — with a human-in-the-loop review UI.
 
-![FlashNote UI](https://img.shields.io/badge/status-active-brightgreen) ![Python](https://img.shields.io/badge/python-3.11+-blue) ![Claude](https://img.shields.io/badge/AI-Claude%20Sonnet-orange) ![LangGraph](https://img.shields.io/badge/pipeline-LangGraph-purple)
-
----
-
-## Architecture
-
-![FlashNote Architecture](https://s3-alpha.figma.com/thumbnails/2361f4c2-c329-4bde-a14f-dcb1fbbe5136?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAQ4GOSFWC6RGVDPLF%2F20260327%2Fus-west-2%2Fs3%2Faws4_request&X-Amz-Date=20260327T052348Z&X-Amz-Expires=604800&X-Amz-SignedHeaders=host&X-Amz-Signature=8d4ed7c3744e3837110cd13fdde909dd5e300d9e42bc16b17127fca52cdb19a3)
-
-> [Edit diagram in FigJam](https://www.figma.com/online-whiteboard/create-diagram/5bcb7881-9398-4b5c-870d-6cada24d5998?utm_source=claude&utm_content=edit_in_figjam)
-
-```
-Screenshots / PDFs / RTFs
-         ↓
-  Watcher  +  Upload API
-         ↓
-      queue.json
-         ↓
-  LangGraph Pipeline (6 nodes)
-  Intake → Uncertainty → Visuals → Draft → Reflect → Finalize
-         ↓
-  Library View  ·  Queue View  ·  Graph View
-```
+![FlashNote UI](https://img.shields.io/badge/status-active-brightgreen) ![Python](https://img.shields.io/badge/python-3.11+-blue) ![Claude](https://img.shields.io/badge/AI-Claude%20Sonnet-orange) ![Tavily](https://img.shields.io/badge/search-Tavily-purple)
 
 ---
 
 ## What it does
 
-1. **Capture** — Upload photos from your phone (QR code) or drag-and-drop from desktop. PDFs/RTFs are used as AI context.
-2. **Process** — 6-node LangGraph pipeline: extract → search gaps → generate visuals → write draft → reflect → finalize
-3. **Review** — Approve, reject, or regenerate notes in the Queue view. Keyboard shortcuts: `A` approve, `R` regen, `Delete` reject.
-4. **Read** — Library view: browse all approved notes by course/module, search, read rendered markdown with mermaid diagrams.
+1. **Capture** — Upload photos from your phone (QR code scan) or drag-and-drop files from your desktop
+2. **Process** — A 5-node LangGraph pipeline extracts content, fills knowledge gaps via Tavily search, writes a structured markdown note with mermaid diagrams, and self-reviews quality
+3. **Review** — A web UI lets you read, edit, and approve each note before it touches Obsidian
+4. **Sync** — Approved notes land in your Obsidian vault under `Course/Module/note.md` with assets
 
 ---
 
 ## Features
 
 - **Phone upload via QR code** — scan once, shoot up to 15 photos per session
-- **Smart Merge** — AI consolidates related notes in the same module into one
-- **Smart Order** — AI sequences notes by topic logic, manual ↑↓ reorder
-- **Bulk actions** — multi-select checkboxes, approve/delete/move in batch
-- **Graph view** — force-directed knowledge map; click wikilink nodes to search
-- **Library view** — in-app reader, no Obsidian needed
-- **Duplicate detection** — MD5 hash skip on re-upload
-- **Pipeline stage labels** — live progress on each note row
-- **Error visibility** — failed notes show error + retry button
-- **Undo delete** — 5-second undo window before hard delete
-- **Desktop app** — `FlashNote.app` starts server + opens browser on click
-- **Dark mode** — Claude/Anthropic colour palette
+- **Desktop upload modal** — drag-and-drop images or `.txt` notes
+- **Auto-detect course & module** — tap ✦ Auto-detect at upload time; Claude Haiku looks at your images and fills in the right course + module from your existing structure
+- **Course & module autocomplete** — typing in the upload form shows your existing phases/modules as suggestions (local, zero cost)
+- **Group photos per note** — choose 1 / 2 / 3 photos per note, or Smart Group (AI) to auto-cluster by topic
+- **Your understanding field** — add your own notes at upload time; AI builds on them
+- **AI quality loop** — draft is scored on Accuracy, Completeness, Wikilink Density; regenerates with Claude Sonnet if score is low
+- **Library view** — folder-style tree (Course → Module → notes), all collapsed by default; collapsible sidebar with ◀/▶ toggle
+- **Queue post-processing** — per course/module: Consolidate duplicates (🔀), Smart Order (🗂), Approve all (✓), Regen (↻), Delete (🗑)
+- **Graph view** — Obsidian-style force-directed graph showing notes AND wikilinks as nodes, filterable by course/module
+- **Dark mode** — Claude/Anthropic colour palette with smooth transitions
+- **Obsidian sync** — proper YAML frontmatter, `[[wikilinks]]`, mermaid diagrams, assets embedded
 
 ---
 
@@ -82,7 +61,7 @@ TAVILY_API_KEY=your_key_here         # required — tavily.com (free tier works)
 python main.py
 ```
 
-Opens at `http://localhost:8765`. Scan the QR code on your phone to upload photos wirelessly.
+Opens at `http://localhost:8766` (dev) or `http://localhost:8765` (main/stable). Scan the QR code on your phone to upload photos wirelessly.
 
 ---
 
@@ -130,9 +109,18 @@ FlashNote/
 | `obsidian_vault_path` | `./vault` | Where approved notes are saved |
 | `watched_folder` | `./screenshots` | Folder watched for auto-ingestion |
 | `default_expansion_level` | `detailed` | `brief` / `detailed` / `deep dive` |
-| `port` | `8765` | Local server port |
+| `port` | `8766` (dev) / `8765` (main) | Fixed ports — dev and main never share a port |
 
 Settings are changed live via the web UI — no restart needed.
+
+### Dev / Main port convention
+
+| Branch | Port | Purpose |
+|---|---|---|
+| `dev` | **8766** | Active development — all new features land here first |
+| `main` | **8765** | Stable — only updated when `dev` is fully tested |
+
+Ports are fixed (no random fallback). If the port is in use, the server exits with a clear error.
 
 ---
 

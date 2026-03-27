@@ -227,6 +227,84 @@ def _auto_group_images(image_paths: list[str], context_text: str = "") -> list[l
         return [[p] for p in image_paths]
 
 
+@app.post("/api/suggest-placement")
+async def suggest_placement(files: list[UploadFile] = File(default=[])):
+    """Look at uploaded images and suggest the best matching course + module from existing notes."""
+    import anthropic, base64, json as _json, tempfile, os as _os
+
+    # Build course→module map from existing approved notes
+    existing = queue_store.list_all()
+    structure: dict[str, set] = {}
+    for n in existing:
+        if n.get("status") != "approved":
+            continue
+        c = n.get("course_name", "").strip()
+        m = n.get("module_name", "").strip()
+        if c:
+            structure.setdefault(c, set())
+            if m:
+                structure[c].add(m)
+
+    if not structure:
+        return {"course": "", "module": "", "reason": "No existing notes to match against."}
+
+    structure_text = "\n".join(
+        f"- {c}: {', '.join(sorted(ms)) if ms else '(no modules yet)'}"
+        for c, ms in sorted(structure.items())
+    )
+
+    # Save uploaded images to temp files and resize for cheap vision call
+    tmp_paths = []
+    try:
+        for f in files[:3]:  # max 3 images for cost
+            ext = (f.filename or "img").split(".")[-1].lower()
+            if ext not in ("jpg", "jpeg", "png", "gif", "webp"):
+                continue
+            data = await f.read()
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}")
+            tmp.write(data)
+            tmp.close()
+            tmp_paths.append(tmp.name)
+
+        if not tmp_paths:
+            return {"course": "", "module": "", "reason": "No image files to analyse."}
+
+        content = []
+        for path in tmp_paths:
+            img_bytes = _resize_image_for_grouping(path, max_px=512)
+            content.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(img_bytes).decode()}
+            })
+
+        content.append({
+            "type": "text",
+            "text": (
+                "These are study notes/screenshots. Based on their content, which existing course and module do they best fit into?\n\n"
+                f"Existing structure:\n{structure_text}\n\n"
+                "Reply with JSON only, no explanation: {\"course\": \"<exact course name>\", \"module\": \"<exact module name or empty string>\", \"reason\": \"<one sentence>\"}"
+            )
+        })
+
+        client = anthropic.Anthropic()
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=256,
+            messages=[{"role": "user", "content": content}]
+        )
+        raw = msg.content[0].text.strip()
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        result = _json.loads(raw[start:end])
+        return result
+    except Exception as e:
+        return {"course": "", "module": "", "reason": f"Could not detect: {e}"}
+    finally:
+        for p in tmp_paths:
+            try: _os.unlink(p)
+            except: pass
+
+
 @app.post("/api/upload")
 async def upload_photo(
     files: list[UploadFile] = File(default=[]),
@@ -453,20 +531,51 @@ async def auto_group_status(batch_id: str):
 
 # ── Local embedding model (loaded once, reused) ───────────────────────────────
 _embed_model = None
+def _get_hf_embeddings(texts: list[str]) -> list[list[float]] | None:
+    """
+    Get embeddings via HuggingFace Inference API (router).
+    Falls back to TF-IDF if token lacks inference permissions.
+    """
+    import os, requests
+    hf_key = os.environ.get("HF_API_KEY", "")
+    if not hf_key:
+        return None
+
+    # Try HF router (new endpoint as of 2025)
+    url = "https://router.huggingface.co/hf-inference/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
+    try:
+        resp = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {hf_key}"},
+            json={"inputs": texts, "options": {"wait_for_model": True}},
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list) and len(data) == len(texts):
+                print(f"[embed] HF router OK — dim {len(data[0])}")
+                return data
+        print(f"[embed] HF router {resp.status_code}: {resp.text[:150]} — falling back to TF-IDF")
+    except Exception as e:
+        print(f"[embed] HF request failed: {e} — falling back to TF-IDF")
+
+    return None
+
+
+def _tfidf_embeddings(texts: list[str]) -> list[list[float]]:
+    """
+    Zero-dependency TF-IDF embeddings using sklearn.
+    No API, no download — works offline. Good enough for topic clustering.
+    """
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    vec = TfidfVectorizer(max_features=512, stop_words="english", ngram_range=(1, 2))
+    mat = vec.fit_transform(texts)
+    return mat.toarray().tolist()
+
+
 def _get_embed_model():
-    """Lazy-load sentence-transformer. Uses Mac Metal (MPS) if available."""
-    global _embed_model
-    if _embed_model is None:
-        try:
-            from sentence_transformers import SentenceTransformer
-            import torch
-            device = "mps" if torch.backends.mps.is_available() else "cpu"
-            _embed_model = SentenceTransformer("all-MiniLM-L6-v2", device=device)
-            print(f"[embed] Loaded all-MiniLM-L6-v2 on {device}")
-        except Exception as e:
-            print(f"[embed] Failed to load model: {e}")
-            _embed_model = None
-    return _embed_model
+    """Returns None — we use HF Inference API instead of local model."""
+    return None
 
 
 def _group_by_similarity(pool: list[dict], target_groups: int) -> list[list[int]]:
@@ -483,8 +592,7 @@ def _group_by_similarity(pool: list[dict], target_groups: int) -> list[list[int]
     from sklearn.cluster import AgglomerativeClustering
     from sklearn.preprocessing import normalize
 
-    model = _get_embed_model()
-    if model is None or len(pool) < 2:
+    if len(pool) < 2:
         return [list(range(len(pool)))]
 
     def _strip_fm(md: str) -> str:
@@ -499,9 +607,17 @@ def _group_by_similarity(pool: list[dict], target_groups: int) -> list[list[int]
         body = _strip_fm(n.get("draft_markdown", ""))
         texts.append(f"{n.get('title', '')} {body[:400]}")
 
-    # Encode to dense vectors — this is the "compression" step analogous to PolarQuant
-    embeddings = model.encode(texts, batch_size=32, show_progress_bar=False)
-    # L2-normalize so cosine similarity = dot product (like QJL sign normalization)
+    # Get embeddings: try HF API first, fall back to TF-IDF (no download needed)
+    import numpy as np
+    raw_embeddings = _get_hf_embeddings(texts)
+    if raw_embeddings is not None:
+        print(f"[embed] Using HF semantic embeddings for {len(texts)} notes")
+        embeddings = np.array(raw_embeddings, dtype=float)
+    else:
+        print(f"[embed] Using TF-IDF embeddings for {len(texts)} notes (offline mode)")
+        embeddings = np.array(_tfidf_embeddings(texts), dtype=float)
+
+    # L2-normalize so cosine similarity = dot product
     embeddings = normalize(embeddings, norm="l2")
 
     # Cosine distance threshold: merge if similarity > 0.65 (empirically good for study notes)

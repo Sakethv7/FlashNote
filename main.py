@@ -1,23 +1,33 @@
+import os
 import socket
 import threading
 import time
 import webbrowser
+from pathlib import Path
 
 import uvicorn
+
+# Load .env so HF_API_KEY and other secrets are available to all modules
+_env_path = Path(__file__).parent / ".env"
+if _env_path.exists():
+    for _line in _env_path.read_text().splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _v = _line.split("=", 1)
+            os.environ.setdefault(_k.strip(), _v.strip())
 
 from config import settings
 from watcher import start_all_watchers
 
 
 def find_free_port(preferred: int = 8765) -> int:
+    """Use the configured port exactly — fail clearly if already in use."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(("127.0.0.1", preferred))
             return preferred
     except OSError:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("127.0.0.1", 0))
-            return s.getsockname()[1]
+        raise SystemExit(f"Port {preferred} is already in use. Kill the existing process first.")
 
 
 def wait_for_server(port: int, timeout: float = 60.0):
