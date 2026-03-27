@@ -4,6 +4,22 @@ let allNotes = [];      // full list from /api/library
 let currentNoteId = null;
 let searchQuery = '';
 
+// ── Sidebar toggle ────────────────────────────────────────────────────────────
+function toggleLibSidebar() {
+  const sidebar = document.querySelector('.lib-sidebar');
+  const btn = document.getElementById('lib-sidebar-toggle');
+  const collapsed = sidebar.classList.toggle('collapsed');
+  btn.textContent = collapsed ? '▶' : '◀';
+  localStorage.setItem('lib-sidebar-collapsed', collapsed ? '1' : '0');
+}
+
+function initLibSidebar() {
+  if (localStorage.getItem('lib-sidebar-collapsed') === '1') {
+    document.querySelector('.lib-sidebar').classList.add('collapsed');
+    document.getElementById('lib-sidebar-toggle').textContent = '▶';
+  }
+}
+
 // Course color palette — matches graph.js COURSE_PALETTE
 const COURSE_COLORS = ['#d97757','#c4673f','#a85432','#e8956d','#8b6f5e','#6b4f40','#b8816a','#d4a898'];
 const _courseColorCache = {};
@@ -19,6 +35,7 @@ function getCourseColor(course) {
 // ── Init ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   initTheme();
+  initLibSidebar();
   mermaid.initialize({ startOnLoad: false, theme: document.documentElement.dataset.theme === 'dark' ? 'dark' : 'default', securityLevel: 'loose' });
 
   const hash = location.hash.slice(1);
