@@ -21,14 +21,13 @@ from watcher import start_all_watchers
 
 
 def find_free_port(preferred: int = 8765) -> int:
+    """Use the configured port exactly — fail clearly if already in use."""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
             s.bind(("127.0.0.1", preferred))
             return preferred
     except OSError:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("127.0.0.1", 0))
-            return s.getsockname()[1]
+        raise SystemExit(f"Port {preferred} is already in use. Kill the existing process first.")
 
 
 def wait_for_server(port: int, timeout: float = 60.0):

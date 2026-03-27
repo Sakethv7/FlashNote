@@ -19,7 +19,7 @@ class Settings:
     obsidian_vault_path: str = str(APP_DIR / "vault")
     watched_folder: str = str(APP_DIR / "screenshots")
     default_expansion_level: str = "detailed"
-    port: int = 8765
+    port: int = 8766  # dev branch — main uses 8765
 
 CONFIG_PATH = APP_DIR / "config.json"
 
