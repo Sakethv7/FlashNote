@@ -113,6 +113,20 @@
       border: 2px solid var(--border);
       display: block;
     }
+    .thumb-doc {
+      width: 88px;
+      height: 88px;
+      border-radius: 10px;
+      border: 2px solid var(--border);
+      background: var(--bg);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+    }
+    .thumb-doc .doc-icon { font-size: 28px; }
+    .thumb-doc .doc-name { font-size: 9px; color: var(--muted); font-weight: 500; text-align: center; max-width: 76px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; }
     .thumb-remove {
       position: absolute;
       top: -8px;
@@ -302,9 +316,9 @@
 <body>
   <div class="page">
     <div class="header">
-      <div class="logo">📸</div>
+      <div class="logo">📚</div>
       <h1>FlashNote</h1>
-      <p>Add up to 15 photos — each becomes a note</p>
+      <p>Add photos, PDFs, or text files — each becomes a note</p>
     </div>
 
     <div class="card" id="upload-card">
@@ -312,17 +326,17 @@
       <!-- Photo queue -->
       <div>
         <div class="photo-queue-label">
-          Photos
+          Files
           <span class="photo-count-badge" id="count-badge">0 / 15</span>
         </div>
       </div>
 
       <!-- Empty: big add first button -->
       <div class="add-first-btn" id="add-first-btn">
-        <input type="file" id="file-input-main" accept="image/*" multiple />
-        <div class="btn-icon">📷</div>
-        <div class="btn-label">Tap to add photos</div>
-        <div class="btn-sub">Camera or camera roll — select multiple</div>
+        <input type="file" id="file-input-main" accept="image/*,.pdf,.txt,.rtf" multiple />
+        <div class="btn-icon">📎</div>
+        <div class="btn-label">Tap to add files</div>
+        <div class="btn-sub">Photos, PDFs, .txt or .rtf (TextEdit)</div>
       </div>
 
       <!-- Filled: thumbnail strip + add-more tile -->
@@ -330,7 +344,7 @@
         <div class="photo-strip" id="photo-strip">
           <!-- thumbnails injected here -->
           <div class="add-tile" id="add-tile">
-            <input type="file" id="file-input-more" accept="image/*" multiple />
+            <input type="file" id="file-input-more" accept="image/*,.pdf,.txt,.rtf" multiple />
             <div class="add-icon">＋</div>
             <div class="add-text">Add more</div>
           </div>
@@ -358,13 +372,14 @@
 
       <!-- Group size -->
       <div class="field" id="group-field">
-        <label>Photos per note</label>
-        <div style="display:flex;gap:8px;">
-          <button class="group-btn active" data-g="1" onclick="setGroup(1,this)">1 photo<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">1 note each</span></button>
-          <button class="group-btn" data-g="2" onclick="setGroup(2,this)">2 photos<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">paired notes</span></button>
-          <button class="group-btn" data-g="3" onclick="setGroup(3,this)">3 photos<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">chapter notes</span></button>
+        <label>Images per note</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="group-btn active" data-g="1" onclick="setGroup(1,this)">1 image<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">1 note each</span></button>
+          <button class="group-btn" data-g="2" onclick="setGroup(2,this)">2 images<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">paired notes</span></button>
+          <button class="group-btn" data-g="3" onclick="setGroup(3,this)">3 images<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">chapter notes</span></button>
+          <button class="group-btn" data-g="auto" onclick="setGroup('auto',this)">🤖 Auto<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">smart group</span></button>
         </div>
-        <span class="hint" id="group-hint">Each photo → its own note, processed in order.</span>
+        <span class="hint" id="group-hint">Each image → its own note (PDFs/txt always 1 note each).</span>
       </div>
 
       <!-- Progress -->
@@ -384,7 +399,7 @@
         <div class="success-icon">✅</div>
         <h2 id="success-title">Notes queued!</h2>
         <p id="success-msg">Your photos are being processed. Check FlashNote on your Mac to review.</p>
-        <button class="add-more-btn" onclick="resetForm()">Upload more photos</button>
+        <button class="add-more-btn" onclick="resetForm()">Upload more files</button>
       </div>
 
     </div>
@@ -392,29 +407,48 @@
 
   <script>
     const MAX_PHOTOS = 15;
-    let queue = []; // [{file, objectUrl}]
+    let queue = []; // [{file, objectUrl, isDoc}]
     let groupSize = 1;
+    let groupMode = 'fixed'; // 'fixed' or 'auto'
+
+    function isDoc(file) {
+      const ext = file.name.split('.').pop().toLowerCase();
+      return ext === 'pdf' || ext === 'txt' || ext === 'rtf';
+    }
+    function docIcon(file) {
+      const ext = file.name.split('.').pop().toLowerCase();
+      return ext === 'pdf' ? '📄' : '📝';
+    }
 
     const groupHints = {
-      1: 'Each photo → its own note, processed in order.',
-      2: 'Every 2 consecutive photos → 1 combined note.',
-      3: 'Every 3 consecutive photos → 1 rich chapter note.',
+      1: 'Each image → its own note, processed in order.',
+      2: 'Every 2 consecutive images → 1 combined note.',
+      3: 'Every 3 consecutive images → 1 rich chapter note.',
+      auto: '🤖 AI analyses all images together and groups them by topic automatically.',
     };
 
     function setGroup(n, btn) {
-      groupSize = n;
+      groupSize = n === 'auto' ? 1 : n;
+      groupMode = n === 'auto' ? 'auto' : 'fixed';
       document.querySelectorAll('.group-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
-      document.getElementById('group-hint').textContent = groupHints[n];
+      document.getElementById('group-hint').textContent = groupHints[n] || groupHints[1];
       updateUploadLabel();
     }
 
     function updateUploadLabel() {
       const n = queue.length;
       if (n === 0) { document.getElementById('upload-btn-label').textContent = 'Upload & Generate Notes'; return; }
-      const notes = Math.ceil(n / groupSize);
-      document.getElementById('upload-btn-label').textContent =
-        `Upload & Generate ${notes} Note${notes > 1 ? 's' : ''}`;
+      if (groupMode === 'auto') {
+        document.getElementById('upload-btn-label').textContent = 'Upload & Auto-Group 🤖';
+      } else {
+        const notes = Math.ceil(n / groupSize);
+        document.getElementById('upload-btn-label').textContent =
+          `Upload & Generate ${notes} Note${notes > 1 ? 's' : ''}`;
+      }
+      // Hide group size picker when all files are docs (PDFs/txt don't group)
+      const hasImages = queue.some(item => !item.isDoc);
+      document.getElementById('group-field').style.display = hasImages ? '' : 'none';
     }
 
     // ─── Load course suggestions ───
@@ -431,7 +465,10 @@
     function addFiles(fileList) {
       const remaining = MAX_PHOTOS - queue.length;
       const toAdd = Array.from(fileList).slice(0, remaining);
-      toAdd.forEach(f => queue.push({ file: f, objectUrl: URL.createObjectURL(f) }));
+      toAdd.forEach(f => {
+        const doc = isDoc(f);
+        queue.push({ file: f, objectUrl: doc ? null : URL.createObjectURL(f), isDoc: doc });
+      });
       renderStrip();
       checkReady();
     }
@@ -458,14 +495,17 @@
       queue.forEach((item, i) => {
         const wrap = document.createElement('div');
         wrap.className = 'thumb-wrap';
+        const inner = item.isDoc
+          ? `<div class="thumb-doc"><div class="doc-icon">${docIcon(item.file)}</div><div class="doc-name">${item.file.name}</div></div>`
+          : `<img src="${item.objectUrl}" alt="file ${i+1}" />`;
         wrap.innerHTML = `
-          <img src="${item.objectUrl}" alt="photo ${i+1}" />
+          ${inner}
           <div class="thumb-num">${i + 1}</div>
           <div class="thumb-remove" data-index="${i}">✕</div>
         `;
         wrap.querySelector('.thumb-remove').addEventListener('click', (e) => {
           e.stopPropagation();
-          URL.revokeObjectURL(queue[i].objectUrl);
+          if (!queue[i].isDoc) URL.revokeObjectURL(queue[i].objectUrl);
           queue.splice(i, 1);
           renderStrip();
           checkReady();
@@ -524,15 +564,20 @@
         const row = document.createElement('div');
         row.className = 'photo-row';
         row.id = `row-${noteNum}`;
+        const thumbHtml = group[0].isDoc
+          ? `<span style="font-size:24px;">${docIcon(group[0].file)}</span>`
+          : `<img src="${group[0].objectUrl}" />`;
         row.innerHTML = `
-          <img src="${group[0].objectUrl}" />
-          <span class="photo-row-name">Note ${noteNum}${group.length > 1 ? ` (${group.length} photos)` : ''}</span>
+          ${thumbHtml}
+          <span class="photo-row-name">Note ${noteNum}${group.length > 1 ? ` (${group.length} files)` : ''}</span>
           <span class="photo-row-status" id="status-${noteNum}">⏳</span>`;
         perPhoto.appendChild(row);
       }
 
-      // Send all files in one request — backend groups by group_size
-      label.textContent = `Uploading ${queue.length} photo${queue.length > 1 ? 's' : ''}…`;
+      // Send all files in one request — backend groups by group_size or auto
+      label.textContent = groupMode === 'auto'
+        ? `Uploading & analysing ${queue.length} image${queue.length > 1 ? 's' : ''} with AI…`
+        : `Uploading ${queue.length} file${queue.length > 1 ? 's' : ''}…`;
       fill.style.width = '20%';
 
       const form = new FormData();
@@ -540,6 +585,7 @@
       form.append('course_name', course);
       form.append('module_name', module);
       form.append('group_size', groupSize);
+      form.append('group_mode', groupMode);
       if (userNotes) form.append('user_notes', userNotes);
 
       // Animate progress while waiting
@@ -574,7 +620,7 @@
         document.getElementById('success-title').textContent =
           noteCount === 1 ? 'Note queued!' : `${noteCount} notes queued!`;
         document.getElementById('success-msg').textContent =
-          `${queue.length} photo${queue.length > 1 ? 's' : ''} → ${noteCount} note${noteCount > 1 ? 's' : ''} being processed. Check FlashNote on your Mac to review.`;
+          `${queue.length} file${queue.length > 1 ? 's' : ''} → ${noteCount} note${noteCount > 1 ? 's' : ''} being processed. Check FlashNote on your Mac to review.`;
         document.getElementById('success-state').classList.add('show');
       } else {
         // Re-show form for retry
@@ -586,7 +632,7 @@
 
     // ─── Reset ───
     function resetForm() {
-      queue.forEach(item => URL.revokeObjectURL(item.objectUrl));
+      queue.forEach(item => { if (!item.isDoc) URL.revokeObjectURL(item.objectUrl); });
       queue = [];
       document.getElementById('course-input').value = '';
       document.getElementById('module-input').value = '';

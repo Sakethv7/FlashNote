@@ -6,7 +6,7 @@
   <title>FlashNote</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/css/style.css" />
+  <link rel="stylesheet" href="/static/css/style.css?v=4" />
 </head>
 <body>
   <!-- Navbar -->
@@ -16,6 +16,7 @@
       FlashNote
     </a>
     <div class="navbar-actions">
+      <a href="/library" class="btn-icon" title="Library — read approved notes">📖</a>
       <button class="btn-icon" title="Upload files from desktop" onclick="openUploadModal()">↑</button>
       <button class="btn-icon" title="Upload from phone" onclick="openQR()">📱</button>
       <button class="theme-toggle" id="theme-btn" onclick="toggleTheme()" title="Switch to dark mode">🌙</button>
@@ -33,24 +34,32 @@
     <div class="upload-modal-body">
       <!-- Drop zone (shown when no files yet) -->
       <div class="drop-zone" id="desktop-drop-zone">
-        <input type="file" id="desktop-file-input" accept="image/*,.txt" multiple />
+        <input type="file" id="desktop-file-input" accept="image/*,.txt,.pdf,.rtf" multiple />
         <div class="drop-zone-icon">📁</div>
         <div class="drop-zone-label">Drop files here or click to browse</div>
-        <div class="drop-zone-sub">Images (JPG, PNG, WEBP) or .txt notes — select multiple</div>
+        <div class="drop-zone-sub">Images, PDFs, .txt, or .rtf (TextEdit) — select multiple</div>
       </div>
-      <!-- Thumbnail strip (shown when files selected) -->
+      <!-- Thumbnail strip (shown when images selected) -->
       <div id="desktop-thumb-section" style="display:none;">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-          <span style="font-size:12px;font-weight:600;color:var(--text);">Selected files</span>
+          <span style="font-size:12px;font-weight:600;color:var(--text);">Images</span>
           <span id="desktop-file-count" style="font-size:11px;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:1px 8px;"></span>
         </div>
         <div id="desktop-thumb-strip" style="display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;scrollbar-width:none;min-height:72px;align-items:center;"></div>
-        <!-- Add more tile -->
-        <div id="desktop-add-tile" style="flex-shrink:0;width:68px;height:68px;border-radius:8px;border:2px dashed var(--accent);background:var(--accent-subtle);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;cursor:pointer;position:relative;margin-top:4px;">
-          <input type="file" id="desktop-file-input-more" accept="image/*,.txt" multiple style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;" />
-          <span style="font-size:18px;color:var(--accent);">＋</span>
-          <span style="font-size:9px;font-weight:600;color:var(--accent);">Add more</span>
+      </div>
+      <!-- Context documents section — independent, shows when any docs uploaded -->
+      <div id="desktop-context-section" style="display:none;margin-top:10px;">
+        <div style="font-size:11px;font-weight:600;color:var(--accent);margin-bottom:6px;display:flex;align-items:center;gap:5px;">
+          📎 Context documents <span style="font-weight:400;color:var(--muted);">— guides note generation & smart grouping</span>
         </div>
+        <div id="desktop-context-list" style="display:flex;flex-direction:column;gap:5px;"></div>
+      </div>
+      <!-- Add more button — always visible once files selected -->
+      <div id="desktop-add-tile" style="display:none;position:relative;margin-top:10px;width:100%;padding:9px 0;border:1.5px dashed var(--accent);border-radius:10px;background:var(--accent-subtle);align-items:center;justify-content:center;gap:8px;cursor:pointer;">
+        <input type="file" id="desktop-file-input-more" accept="image/*,.txt,.pdf,.rtf" multiple style="position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;" />
+        <span style="font-size:16px;color:var(--accent);">＋</span>
+        <span style="font-size:13px;font-weight:600;color:var(--accent);">Add more files</span>
+        <span style="font-size:11px;color:var(--muted);">images · PDF · txt · rtf</span>
       </div>
       <div class="form-group">
         <label style="font-size:13px;font-weight:500;color:var(--text);">Course <span style="color:var(--danger);">*</span></label>
@@ -72,13 +81,22 @@
         <span style="font-size:11px;color:var(--muted);margin-top:4px;display:block;">AI will build on your notes and generate diagrams tailored to your understanding.</span>
       </div>
       <div class="form-group">
-        <label style="font-size:13px;font-weight:500;color:var(--text);">Photos per note</label>
+        <label style="font-size:13px;font-weight:500;color:var(--text);">Note length</label>
         <div style="display:flex;gap:8px;">
-          <button class="desktop-group-btn active" data-g="1" onclick="setDesktopGroup(1,this)">1 photo<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">1 note each</span></button>
-          <button class="desktop-group-btn" data-g="2" onclick="setDesktopGroup(2,this)">2 photos<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">paired notes</span></button>
-          <button class="desktop-group-btn" data-g="3" onclick="setDesktopGroup(3,this)">3 photos<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">chapter notes</span></button>
+          <button class="desktop-group-btn" data-exp="concise" onclick="setDesktopExpansion('concise',this)">Concise<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">~200 words</span></button>
+          <button class="desktop-group-btn active" data-exp="detailed" onclick="setDesktopExpansion('detailed',this)">Detailed<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">~600 words</span></button>
+          <button class="desktop-group-btn" data-exp="comprehensive" onclick="setDesktopExpansion('comprehensive',this)">Full<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">~1200 words</span></button>
         </div>
-        <span style="font-size:11px;color:var(--muted);margin-top:4px;display:block;" id="desktop-group-hint">Each photo → its own note, processed in order.</span>
+      </div>
+      <div class="form-group">
+        <label style="font-size:13px;font-weight:500;color:var(--text);">Images per note</label>
+        <div style="display:flex;gap:8px;">
+          <button class="desktop-group-btn active" data-g="1" onclick="setDesktopGroup(1,this)">1 image<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">1 note each</span></button>
+          <button class="desktop-group-btn" data-g="2" onclick="setDesktopGroup(2,this)">2 images<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">paired notes</span></button>
+          <button class="desktop-group-btn" data-g="3" onclick="setDesktopGroup(3,this)">3 images<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">chapter notes</span></button>
+          <button class="desktop-group-btn" data-g="auto" onclick="setDesktopGroup('auto',this)">🤖 Auto<br/><span style="font-size:10px;font-weight:400;color:var(--muted);">smart group</span></button>
+        </div>
+        <span style="font-size:11px;color:var(--muted);margin-top:4px;display:block;" id="desktop-group-hint">Each image → its own note, processed in order.</span>
       </div>
       <div id="desktop-progress" style="display:none;">
         <div style="font-size:12px;color:var(--muted);margin-bottom:6px;" id="desktop-progress-label">Uploading…</div>
@@ -113,15 +131,24 @@
   <!-- Status Bar -->
   <div class="status-bar">
     <div class="status-bar-left">
-      <div class="status-indicator">
-        <div class="status-dot" id="watcher-dot"></div>
-        <span id="watcher-label">Watcher: checking...</span>
+      <div class="status-stat">
+        Queue:&nbsp;<span id="queue-count" class="stat-pill stat-queue">–</span>
       </div>
-      <div class="status-stat">Queue: <span id="queue-count">–</span></div>
-      <div class="status-stat">Processing: <span id="processing-count">–</span></div>
+      <div class="status-stat">
+        Processing:&nbsp;<span id="processing-count" class="stat-pill stat-processing">–</span>
+      </div>
+      <!-- Consolidation job indicator (hidden by default) -->
+      <div id="consolidation-indicator" style="display:none;align-items:center;gap:6px;font-size:12px;color:#7c5cbf;font-weight:600;">
+        <span class="spinner" style="width:12px;height:12px;border-width:2px;border-color:#e0d4f7;border-top-color:#7c5cbf;"></span>
+        <span id="consolidation-label">Consolidating…</span>
+      </div>
       <button id="approved-chip" onclick="showApprovedInGrid()" style="display:none;background:var(--success-bg,#f0fdf4);color:#16a34a;border:1px solid #bbf7d0;border-radius:20px;font-size:11px;font-weight:600;padding:3px 10px;cursor:pointer;"></button>
     </div>
     <div style="display:flex;align-items:center;gap:10px;">
+      <div class="search-wrap">
+        <span class="search-icon">⌕</span>
+        <input type="search" id="notes-search" class="search-input" placeholder="Search notes…" oninput="filterNotes(this.value)" />
+      </div>
       <div class="view-toggle">
         <button class="active" data-view="grid" onclick="setView('grid')">⊞ Grid</button>
         <button data-view="graph" onclick="setView('graph')">⬡ Graph</button>
@@ -130,18 +157,37 @@
     </div>
   </div>
 
+  <!-- Bulk Action Bar (slides up when notes selected) -->
+  <div id="bulk-bar" class="bulk-bar" style="display:none;">
+    <span id="bulk-count" class="bulk-count">0 selected</span>
+    <div style="display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap;">
+      <select id="bulk-course-select" class="bulk-select" style="display:none;">
+        <option value="">Move to course…</option>
+      </select>
+      <select id="bulk-module-select" class="bulk-select" style="display:none;">
+        <option value="">Move to module…</option>
+      </select>
+      <button class="btn btn-ghost" style="font-size:12px;" onclick="bulkChangeCourse()">📚 Move course</button>
+      <button class="btn btn-ghost" style="font-size:12px;" onclick="bulkChangeModule()">📂 Move module</button>
+      <button class="btn btn-primary" style="font-size:12px;" onclick="bulkApproveSelected()">✓ Approve all</button>
+      <button class="btn btn-danger" style="font-size:12px;" onclick="bulkDeleteSelected()">🗑 Delete all</button>
+    </div>
+    <button onclick="clearBulkSelection()" style="background:none;border:none;cursor:pointer;font-size:18px;color:var(--muted);padding:0 4px;">×</button>
+  </div>
+
   <!-- Main Content -->
   <div class="main-content">
     <div id="cards-container"></div>
     <div id="graph-container" class="graph-container">
       <div class="graph-filters" id="graph-filters">
-        <div class="graph-filter-group">
-          <span class="graph-filter-label">Filter</span>
-          <button class="graph-filter-btn active" data-filter="all" onclick="setGraphFilter('all',null,this)">All</button>
+        <div class="graph-filter-group" style="gap:6px;flex-wrap:wrap;align-items:center;">
+          <span class="graph-filter-label">Courses</span>
+          <button class="graph-filter-btn active" id="graph-all-btn" onclick="clearGraphFilter()">All</button>
+          <span style="width:1px;height:14px;background:var(--border);margin:0 2px;"></span>
+          <div id="graph-course-filters" style="display:contents;"></div>
         </div>
-        <div class="graph-filter-group" id="graph-course-filters"></div>
-        <div class="graph-filter-group" id="graph-module-filters"></div>
-        <div class="graph-legend">
+        <div class="graph-filter-group" id="graph-module-filters" style="gap:6px;flex-wrap:wrap;align-items:center;"></div>
+        <div class="graph-legend" style="margin-left:auto;">
           <span class="graph-legend-item"><span class="graph-legend-dot note-dot"></span>Note</span>
           <span class="graph-legend-item"><span class="graph-legend-dot wiki-dot"></span>Wikilink</span>
         </div>
@@ -159,7 +205,7 @@
 
   <script src="/static/js/utils.js"></script>
   <script src="/static/js/empty-state.js"></script>
-  <script src="/static/js/graph.js"></script>
-  <script src="/static/js/queue.js"></script>
+  <script src="/static/js/graph.js?v=3"></script>
+  <script src="/static/js/queue.js?v=3"></script>
 </body>
 </html>

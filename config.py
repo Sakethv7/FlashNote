@@ -4,10 +4,13 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from dotenv import load_dotenv
+from app_paths import DATA_DIR
 
-load_dotenv(override=True)
+APP_DIR = DATA_DIR
 
-APP_DIR = Path(__file__).parent
+# Load .env from data dir first (packaged app), then fall back to project dir
+load_dotenv(APP_DIR / ".env", override=True)
+load_dotenv(override=False)  # also pick up dev .env in cwd
 
 @dataclass
 class Settings:
@@ -72,9 +75,10 @@ COURSES_PATH = APP_DIR / "courses.json"
 class Course:
     id: str
     course_name: str
-    folder_path: str
+    folder_path: str          # watched folder for auto-ingest (input)
     expansion_level: str = "detailed"  # "brief" | "detailed" | "deep_dive"
     tags: list = field(default_factory=list)
+    vault_path: str = ""      # per-course Obsidian vault (output); empty = use global vault
 
 def load_courses() -> list:
     if COURSES_PATH.exists():

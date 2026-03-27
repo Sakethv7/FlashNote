@@ -7,8 +7,8 @@ const COURSE_PALETTE = [
 ];
 
 const PHYSICS = { REPULSION: 1200, SPRING_LEN: 100, SPRING_K: 0.04, GRAVITY: 0.002, DAMPING: 0.86 };
-const WIKI_COLOR_LIGHT = '#c4a99a';
-const WIKI_COLOR_DARK  = '#6b5a52';
+const WIKI_COLOR_LIGHT = '#7c5cbf';   // purple — distinct from orange note nodes
+const WIKI_COLOR_DARK  = '#9d7de8';
 
 let graphNodes = [];
 let graphEdges = [];
@@ -17,8 +17,11 @@ let animFrameId = null;
 let dragNode    = null;
 let courseColorMap = {};
 let courseList  = [];
-let activeFilter = { type: 'all', value: null };
 let canvasInitialized = false;
+
+// Multi-select filter state — empty Set = "all"
+let selectedCourses = new Set();
+let selectedModules = new Set();
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -74,8 +77,11 @@ function initCanvas() {
     }
   });
 
+  let mouseDownXY = null; // track where mouse actually pressed down
+
   canvas.addEventListener('mousedown', e => {
     const { x, y } = canvasXY(e, canvas);
+    mouseDownXY = { x, y };
     const hit = hitTest(x, y);
     if (hit) dragNode = hit;
   });
@@ -83,10 +89,31 @@ function initCanvas() {
   canvas.addEventListener('mouseup', e => {
     if (!dragNode) return;
     const { x, y } = canvasXY(e, canvas);
-    const moved = Math.hypot(x - dragNode.x, y - dragNode.y);
-    if (moved < 5 && dragNode.noteId) window.location.href = '/review/' + dragNode.noteId;
+    // Compare mouse positions (not node positions — nodes move during physics)
+    const moved = mouseDownXY ? Math.hypot(x - mouseDownXY.x, y - mouseDownXY.y) : 99;
+    if (moved < 8) {
+      if (dragNode.noteId) {
+        // Note node → open review page
+        window.location.href = '/review/' + dragNode.noteId;
+      } else if (dragNode.isWiki) {
+        // Wikilink node → switch to grid, show approved too, search for this term
+        setView('grid');
+        // Show approved notes when coming from graph so wikilinked notes are visible
+        if (typeof showApproved !== 'undefined') showApproved = true;
+        const chip = document.getElementById('approved-chip');
+        if (chip) chip.style.display = 'none'; // hide chip, we're showing all
+        const searchInput = document.getElementById('notes-search');
+        if (searchInput) {
+          searchInput.value = dragNode.label;
+          filterNotes(dragNode.label);
+        }
+      }
+    }
     dragNode = null;
+    mouseDownXY = null;
   });
+
+  window.addEventListener('blur', () => { dragNode = null; mouseDownXY = null; });
 
   canvas.addEventListener('mouseleave', () => {
     dragNode = null;
@@ -101,8 +128,12 @@ function canvasXY(e, canvas) {
 }
 
 function hitTest(x, y) {
-  // check wikilink nodes first (smaller, on top visually)
-  for (const n of graphNodes) if (n.isWiki  && Math.hypot(x - n.x, y - n.y) <= n.r + 4) return n;
+  // Wikilinks are diamonds — use axis-aligned bounding box (Manhattan distance for diamond)
+  for (const n of graphNodes) {
+    if (!n.isWiki) continue;
+    const s = n.r * 1.25 + 6; // diamond half-size + hit padding
+    if (Math.abs(x - n.x) + Math.abs(y - n.y) <= s) return n;
+  }
   for (const n of graphNodes) if (!n.isWiki && Math.hypot(x - n.x, y - n.y) <= n.r + 4) return n;
   return null;
 }
@@ -110,27 +141,90 @@ function hitTest(x, y) {
 // ── filter panel ──────────────────────────────────────────────────────────────
 
 function buildFilterPanel(notes) {
-  const courses = [...new Set(notes.map(n => n.course_name).filter(Boolean))];
-  const modules = [...new Set(notes.map(n => n.module_name).filter(Boolean))];
+  const courses = [...new Set(notes.map(n => n.course_name).filter(Boolean))].sort();
+  courseList = courses;
 
   const cf = document.getElementById('graph-course-filters');
   const mf = document.getElementById('graph-module-filters');
+  const allBtn = document.getElementById('graph-all-btn');
   if (!cf || !mf) return;
 
-  cf.innerHTML = courses.map(c =>
-    `<button class="graph-filter-btn" data-filter="course:${c}" onclick="setGraphFilter('course','${c}',this)">${c}</button>`
-  ).join('');
+  // Course chips (multi-select toggles)
+  cf.innerHTML = courses.map(c => {
+    const color = COURSE_PALETTE[courses.indexOf(c) % COURSE_PALETTE.length];
+    const active = selectedCourses.has(c) ? 'active' : '';
+    return `<button class="graph-filter-btn course-chip ${active}"
+      style="--chip-color:${color};"
+      data-course="${escapeHtmlAttr(c)}"
+      onclick="toggleCourse('${escapeHtmlAttr(c)}')">${c}</button>`;
+  }).join('');
 
-  mf.innerHTML = modules.map(m =>
-    `<button class="graph-filter-btn" data-filter="module:${m}" onclick="setGraphFilter('module','${m}',this)">${m}</button>`
-  ).join('');
+  // Module chips — only show modules from selected courses (or all if none selected)
+  refreshModuleChips(notes);
+
+  // All button state
+  if (allBtn) allBtn.classList.toggle('active', selectedCourses.size === 0 && selectedModules.size === 0);
+}
+
+function refreshModuleChips(notes) {
+  const mf = document.getElementById('graph-module-filters');
+  if (!mf) return;
+  const source = selectedCourses.size > 0
+    ? notes.filter(n => selectedCourses.has(n.course_name))
+    : notes;
+  const modules = [...new Set(source.map(n => n.module_name).filter(Boolean))].sort();
+
+  if (modules.length === 0) { mf.innerHTML = ''; return; }
+
+  mf.innerHTML = `<span class="graph-filter-label" style="font-size:11px;opacity:0.6;">Modules</span>` +
+    modules.map(m => {
+      const active = selectedModules.has(m) ? 'active' : '';
+      return `<button class="graph-filter-btn module-chip ${active}"
+        data-module="${escapeHtmlAttr(m)}"
+        onclick="toggleModule('${escapeHtmlAttr(m)}')">${m}</button>`;
+    }).join('');
+}
+
+function escapeHtmlAttr(s) {
+  return String(s).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+}
+
+function toggleCourse(course) {
+  if (selectedCourses.has(course)) {
+    selectedCourses.delete(course);
+  } else {
+    selectedCourses.add(course);
+  }
+  // Reset module selection when courses change
+  selectedModules.clear();
+  buildFilterPanel(allNotes);
+  buildGraph(allNotes);
+}
+
+function toggleModule(module) {
+  if (selectedModules.has(module)) {
+    selectedModules.delete(module);
+  } else {
+    selectedModules.add(module);
+  }
+  refreshModuleChips(allNotes);
+  // Update module chip states
+  document.querySelectorAll('.module-chip').forEach(b => {
+    b.classList.toggle('active', selectedModules.has(b.dataset.module));
+  });
+  buildGraph(allNotes);
+}
+
+function clearGraphFilter() {
+  selectedCourses.clear();
+  selectedModules.clear();
+  buildFilterPanel(allNotes);
+  buildGraph(allNotes);
 }
 
 function setGraphFilter(type, value, btn) {
-  activeFilter = { type, value };
-  document.querySelectorAll('.graph-filter-btn').forEach(b => b.classList.remove('active'));
-  if (btn) btn.classList.add('active');
-  buildGraph(allNotes);
+  // Legacy single-select — kept for compatibility
+  clearGraphFilter();
 }
 
 // ── main graph builder ────────────────────────────────────────────────────────
@@ -150,10 +244,10 @@ function buildGraph(notes) {
   const W = canvas.clientWidth, H = canvas.clientHeight;
   const cx = W / 2, cy = H / 2;
 
-  // Apply filter
+  // Apply multi-select filter
   let filtered = notes;
-  if (activeFilter.type === 'course') filtered = notes.filter(n => n.course_name === activeFilter.value);
-  if (activeFilter.type === 'module') filtered = notes.filter(n => n.module_name === activeFilter.value);
+  if (selectedCourses.size > 0) filtered = filtered.filter(n => selectedCourses.has(n.course_name));
+  if (selectedModules.size > 0) filtered = filtered.filter(n => selectedModules.has(n.module_name));
 
   courseList = [...new Set(notes.map(n => n.course_name).filter(Boolean))];
   courseColorMap = {};
@@ -324,26 +418,33 @@ function renderGraph() {
     ctx.globalAlpha = 1;
   }
 
-  // Wikilink nodes (drawn on top)
+  // Wikilink nodes — diamond shape for clear visual distinction from circular note nodes
   for (const node of graphNodes) {
     if (!node.isWiki) continue;
-    ctx.globalAlpha = 0.9;
+    const wc = dark ? WIKI_COLOR_DARK : WIKI_COLOR_LIGHT;
+    ctx.globalAlpha = 0.92;
+
+    // Draw diamond (rotated square)
+    const s = node.r * 1.25; // half-size of diamond
     ctx.beginPath();
-    ctx.arc(node.x, node.y, node.r, 0, Math.PI * 2);
-    ctx.fillStyle = dark ? WIKI_COLOR_DARK : '#e8b89a';
+    ctx.moveTo(node.x,     node.y - s); // top
+    ctx.lineTo(node.x + s, node.y);     // right
+    ctx.lineTo(node.x,     node.y + s); // bottom
+    ctx.lineTo(node.x - s, node.y);     // left
+    ctx.closePath();
+    ctx.fillStyle = dark ? 'rgba(157,125,232,0.32)' : 'rgba(124,92,191,0.18)';
     ctx.fill();
-    ctx.strokeStyle = dark ? '#9c8880' : '#d97757';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = wc;
+    ctx.lineWidth = 1.8;
     ctx.stroke();
 
-    if (node.r >= 9) {
-      ctx.globalAlpha = 0.75;
-      ctx.fillStyle = dark ? '#f5ede6' : '#1c1410';
-      ctx.font = '500 9px "Plus Jakarta Sans", sans-serif';
-      ctx.textAlign = 'center';
-      const shortLabel = node.label.length > 18 ? node.label.slice(0, 16) + '…' : node.label;
-      ctx.fillText(shortLabel, node.x, node.y + node.r + 12);
-    }
+    // Label
+    ctx.globalAlpha = 0.88;
+    ctx.fillStyle = wc;
+    ctx.font = '500 9px "Plus Jakarta Sans", sans-serif';
+    ctx.textAlign = 'center';
+    const shortLabel = node.label.length > 18 ? node.label.slice(0, 16) + '…' : node.label;
+    ctx.fillText(shortLabel, node.x, node.y + s + 13);
     ctx.globalAlpha = 1;
   }
 

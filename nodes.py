@@ -12,6 +12,17 @@ from config import settings
 from state import NoteState, SearchResult
 
 
+def _set_stage(state: dict, stage: str):
+    """Update the pipeline_stage on the note in the queue store (best-effort, non-blocking)."""
+    try:
+        from queue_store import queue_store
+        note_id = state.get("note_id")
+        if note_id:
+            queue_store.update(note_id, {"pipeline_stage": stage})
+    except Exception:
+        pass
+
+
 def _get_module_context(course_name: str, module_name: str) -> dict:
     """Return existing wikilinks and tags from approved/in_review notes in the same module."""
     from queue_store import queue_store
@@ -190,6 +201,7 @@ def _claude_text(prompt: str, max_tokens: int = 2000, images: list[str] | None =
 # ─────────────────────────────────────────────
 def intake_extractor(state: NoteState) -> dict:
     """Extract text and diagrams from screenshots using Claude vision."""
+    _set_stage(state, "extracting")
     num_images = len(state["image_paths"])
     merge_instruction = ""
     if num_images > 1:
@@ -240,6 +252,7 @@ Format your response as JSON:
 # ─────────────────────────────────────────────
 def uncertainty_searcher(state: NoteState) -> dict:
     """Search uncertain concepts via Tavily."""
+    _set_stage(state, "searching")
     if not state.get("uncertainties"):
         return {"search_queries": [], "search_results": []}
 
@@ -275,6 +288,7 @@ def uncertainty_searcher(state: NoteState) -> dict:
 # ─────────────────────────────────────────────
 def visual_generator(state: NoteState) -> dict:
     """Claude generates Mermaid diagrams relevant to the screenshot content."""
+    _set_stage(state, "visualizing")
     extracted = state.get("extracted_text", "")
     diagrams = state.get("diagram_descriptions", [])
 
@@ -342,6 +356,7 @@ Return ONLY the mermaid code blocks. No explanation, no text outside the fences.
 # ─────────────────────────────────────────────
 def draft_writer(state: NoteState) -> dict:
     """Write the Obsidian markdown note using Claude."""
+    _set_stage(state, "writing")
     expansion = state.get("expansion_level", "detailed")
     expansion_instructions = {
         "brief": "Write a concise note of 200–400 words. Focus on essential summary and key concepts only.",
@@ -473,6 +488,7 @@ Use [[wikilinks]] liberally throughout. Output ONLY the markdown, no explanation
 # ─────────────────────────────────────────────
 def reflector(state: NoteState) -> dict:
     """Verify the draft, find gaps/abbreviations, fill them using domain knowledge."""
+    _set_stage(state, "reflecting")
     draft_preview = state.get("draft_markdown", "")[:2500]  # enough to count wikilinks accurately
     prompt = f"""You are reviewing an Obsidian note draft for a course: "{state.get('course_name', 'Unknown')}".
 
@@ -528,3 +544,167 @@ If scores are low example:
 def finalize(state: NoteState) -> dict:
     """Mark note as ready for human review."""
     return {"status": "in_review"}
+
+
+# ─────────────────────────────────────────────
+# Utility — Consolidation (on-demand, not part of the main pipeline)
+# ─────────────────────────────────────────────
+
+def consolidate_module_notes(notes: list[dict]) -> list[dict]:
+    """Analyse notes in a course/module for redundancy and produce a consolidation plan.
+
+    Two-pass approach:
+      1. Analysis pass — Claude Sonnet reviews truncated previews and groups notes.
+      2. Merge-write pass — for each merge group, Claude Sonnet writes one unified note.
+
+    Returns a list of action dicts:
+      {"action": "merge",  "primary": note_id, "delete": [note_ids...],
+       "merged_markdown": str, "merged_title": str, "reason": str}
+      {"action": "delete", "note_ids": [...], "reason": str}
+      {"action": "keep",   "note_ids": [...], "reason": str}
+    """
+    if len(notes) < 2:
+        return [{"action": "keep", "note_ids": [n["note_id"] for n in notes],
+                 "reason": "Only one note — nothing to consolidate."}]
+
+    note_index = {n["note_id"]: n for n in notes}
+    course = notes[0].get("course_name", "Unknown")
+    module = notes[0].get("module_name", "")
+    context = f'"{course}"' + (f' / "{module}"' if module else "")
+
+    # ── Phase 1: Analysis ──
+    catalog_lines = []
+    for i, note in enumerate(notes):
+        md = note.get("draft_markdown", "")
+        preview = " ".join(md.split())[:400] if md else "(empty)"
+        catalog_lines.append(
+            f'{i + 1}. ID={note["note_id"]}\n'
+            f'   Title: {note.get("title", "Untitled")}\n'
+            f'   Preview: {preview}'
+        )
+    catalog_str = "\n\n".join(catalog_lines)
+
+    analysis_prompt = f"""You are reviewing {len(notes)} notes from {context} for redundancy and overlap.
+
+NOTES CATALOG:
+{catalog_str}
+
+Your task:
+1. Find notes that share >60% conceptual overlap → group them for MERGE
+2. Find notes that are a true subset / duplicate of another → mark for DELETE
+3. Leave unique notes as KEEP
+
+Rules:
+- When merging, set "primary" to the note_id with the most content (it will be updated in place)
+- If in doubt, KEEP the note
+- Do NOT merge notes that simply share a course — only merge notes covering the SAME concept
+
+Respond with ONLY valid JSON (no markdown fences):
+{{
+  "actions": [
+    {{"action":"merge","note_ids":["<id1>","<id2>"],"primary":"<id1>","reason":"Both explain reflection loops"}},
+    {{"action":"delete","note_ids":["<id3>"],"reason":"Exact duplicate of id1"}},
+    {{"action":"keep","note_ids":["<id4>"],"reason":"Unique topic: tool calling"}}
+  ],
+  "summary": "2 notes merged, 1 deleted, 1 kept"
+}}"""
+
+    fallback_plan = {
+        "actions": [{"action": "keep", "note_ids": [n["note_id"] for n in notes],
+                     "reason": "Analysis failed — no changes made."}],
+        "summary": "Analysis failed."
+    }
+
+    try:
+        raw = _claude_text(analysis_prompt, max_tokens=2000, model=CLAUDE_SONNET)
+        plan = _parse_json_response(raw, fallback_plan)
+    except Exception as e:
+        print(f"[consolidate] Analysis failed: {e}")
+        plan = fallback_plan
+
+    # Collect all note_ids already handled to avoid double-processing
+    handled: set[str] = set()
+    results: list[dict] = []
+
+    for item in plan.get("actions", []):
+        action = item.get("action", "keep")
+        note_ids: list[str] = [nid for nid in item.get("note_ids", []) if nid in note_index]
+        if not note_ids:
+            continue
+
+        # ── Phase 2: Merge-write ──
+        if action == "merge" and len(note_ids) >= 2:
+            primary_id = item.get("primary", note_ids[0])
+            if primary_id not in note_index:
+                primary_id = note_ids[0]
+
+            combined_mds = []
+            for nid in note_ids:
+                n = note_index.get(nid)
+                if n:
+                    combined_mds.append(
+                        f"### Source note: {n.get('title', 'Untitled')}\n\n{n.get('draft_markdown', '')}"
+                    )
+
+            merge_prompt = f"""You are consolidating {len(note_ids)} overlapping notes from {context} into ONE comprehensive note.
+
+NOTES TO MERGE:
+{"---\n".join(combined_mds)}
+
+Write a single unified Obsidian markdown note that:
+1. Preserves the best content from ALL notes — do not lose important details
+2. Eliminates repetition — each concept appears only once
+3. Starts with raw YAML frontmatter (--- delimiters, NOT ```yaml fences)
+4. Has sections: ## Summary, ## Key Concepts (with [[wikilinks]]), ## Visuals (embed any mermaid diagrams), ## Details, ## Open Questions
+5. Is richer and more comprehensive than any individual source note
+6. Uses [[wikilinks]] liberally (aim for 10+ links)
+
+Output ONLY the merged markdown. No explanation."""
+
+            try:
+                merged_md = _claude_text(merge_prompt, max_tokens=5000, model=CLAUDE_SONNET)
+                merged_md = _strip_yaml_fence(merged_md)
+                # Re-sanitize mermaid blocks that may have been transcribed
+                merged_md = re.sub(
+                    r'```mermaid\n(.*?)```',
+                    lambda m: f"```mermaid\n{_sanitize_mermaid(m.group(1).strip())}\n```",
+                    merged_md, flags=re.DOTALL
+                )
+                # Extract title from merged frontmatter
+                merged_title = note_index[primary_id].get("title", "Merged Note")
+                for line in merged_md.split("\n"):
+                    if line.startswith("title:"):
+                        merged_title = line.replace("title:", "").strip().strip('"').strip("'")
+                        break
+
+                results.append({
+                    "action": "merge",
+                    "primary": primary_id,
+                    "delete": [nid for nid in note_ids if nid != primary_id],
+                    "merged_markdown": merged_md,
+                    "merged_title": merged_title,
+                    "reason": item.get("reason", ""),
+                })
+                handled.update(note_ids)
+                print(f"[consolidate] Merged {note_ids} → primary={primary_id} title='{merged_title}'")
+
+            except Exception as e:
+                print(f"[consolidate] Merge-write failed for {note_ids}: {e}")
+                results.append({"action": "keep", "note_ids": note_ids,
+                                 "reason": f"Merge failed ({e}) — kept as-is."})
+                handled.update(note_ids)
+
+        elif action == "delete":
+            results.append({"action": "delete", "note_ids": note_ids, "reason": item.get("reason", "")})
+            handled.update(note_ids)
+
+        else:
+            results.append({"action": "keep", "note_ids": note_ids, "reason": item.get("reason", "")})
+            handled.update(note_ids)
+
+    # Any note not explicitly mentioned in the plan → keep
+    unhandled = [nid for nid in note_index if nid not in handled]
+    if unhandled:
+        results.append({"action": "keep", "note_ids": unhandled, "reason": "Not mentioned in analysis — kept."})
+
+    return results

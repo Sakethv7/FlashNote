@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import Optional
 from state import NoteState
 
-STORE_PATH = Path(__file__).parent / "queue.json"
+from app_paths import DATA_DIR
+STORE_PATH = DATA_DIR / "queue.json"
 
 class QueueStore:
     def __init__(self):
@@ -16,7 +17,8 @@ class QueueStore:
         if STORE_PATH.exists():
             try:
                 self._store = json.loads(STORE_PATH.read_text())
-            except Exception:
+            except Exception as e:
+                print(f"[queue_store] WARNING: Failed to load queue.json ({e}). Starting fresh.")
                 self._store = {}
 
     def _save(self):

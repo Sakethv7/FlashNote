@@ -187,11 +187,11 @@ async function openNote(noteId) {
   const tags = (note.tags || []).map(t => `<span class="lib-tag">${escHtml(t)}</span>`).join('');
   document.getElementById('lib-note-meta').innerHTML = `${tags}${date ? `<span class="lib-date">${date}</span>` : ''}`;
 
-  // Source image links — open in new tab
+  // Source image links — open in lightbox
   const thumbsEl = document.getElementById('lib-thumbs');
   if (note.image_paths && note.image_paths.length) {
     thumbsEl.innerHTML = note.image_paths.map((_, i) =>
-      `<a href="/api/image-raw/${noteId}?idx=${i}" target="_blank" class="lib-source-link">📷 Source ${i + 1}</a>`
+      `<button onclick="openLightbox('${noteId}',${i},${note.image_paths.length})" class="lib-source-link">📷 Source ${i + 1}</button>`
     ).join('');
     thumbsEl.style.display = 'flex';
   } else {

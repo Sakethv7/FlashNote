@@ -350,6 +350,32 @@ async function saveTitle(rawValue) {
   }
 }
 
+// Keyboard shortcuts: A = approve, R = regenerate, Backspace/Delete = reject
+document.addEventListener('keydown', e => {
+  // Skip if user is typing in an input, textarea, or contentEditable element
+  const tag = document.activeElement?.tagName;
+  const isEditable = document.activeElement?.contentEditable === 'true';
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || isEditable || isProcessing) return;
+
+  if (e.key === 'a' || e.key === 'A') {
+    e.preventDefault();
+    approve();
+  } else if (e.key === 'r' || e.key === 'R') {
+    e.preventDefault();
+    regenerate();
+  } else if (e.key === 'Delete' || e.key === 'Backspace') {
+    e.preventDefault();
+    reject();
+  }
+});
+
+// Show shortcut hints on first visit
+function showShortcutHint() {
+  if (localStorage.getItem('reviewShortcutsShown')) return;
+  localStorage.setItem('reviewShortcutsShown', '1');
+  setTimeout(() => showToast('Tip: Press A to approve · R to regenerate · Delete to reject', 'info'), 1500);
+}
+
 // Attach editor listener
 document.addEventListener('DOMContentLoaded', () => {
   const editor = document.getElementById('markdown-editor');
@@ -359,4 +385,5 @@ document.addEventListener('DOMContentLoaded', () => {
   titleInput.addEventListener('input', () => autoSizeTitle(titleInput));
 
   loadNote();
+  showShortcutHint();
 });

@@ -83,6 +83,19 @@
   </div>
 
   <div class="toast-container" id="toast-container"></div>
+
+  <!-- Source image lightbox -->
+  <div id="lib-lightbox" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,0.85);display:none;align-items:center;justify-content:center;flex-direction:column;gap:12px;" onclick="closeLightbox()">
+    <button onclick="closeLightbox()" style="position:fixed;top:20px;right:24px;background:none;border:none;color:#fff;font-size:28px;cursor:pointer;line-height:1;">✕</button>
+    <img id="lib-lightbox-img" src="" alt="Source image" style="max-width:90vw;max-height:85vh;border-radius:8px;box-shadow:0 8px 40px rgba(0,0,0,0.6);object-fit:contain;" />
+    <div id="lib-lightbox-caption" style="color:#ccc;font-size:13px;"></div>
+    <div id="lib-lightbox-error" style="display:none;color:#fff;font-size:15px;text-align:center;padding:40px;">
+      <div style="font-size:40px;margin-bottom:12px;">🖼️</div>
+      <div>Source image not available</div>
+      <div style="color:#aaa;font-size:13px;margin-top:6px;">The original file may have been moved or deleted.</div>
+    </div>
+  </div>
+
   <script src="/static/js/library.js"></script>
 </body>
 </html>

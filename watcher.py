@@ -139,6 +139,8 @@ def start_all_watchers():
         add_course_watcher(course)
 
 def add_course_watcher(course):
+    if not course.folder_path or not course.folder_path.strip():
+        return  # skip courses with no watch folder configured
     with _lock:
         if course.id in _watchers:
             return

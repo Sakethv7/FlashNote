@@ -4,7 +4,6 @@ import time
 import webbrowser
 
 import uvicorn
-import webview
 
 from config import settings
 from watcher import start_all_watchers
@@ -21,21 +20,19 @@ def find_free_port(preferred: int = 8765) -> int:
             return s.getsockname()[1]
 
 
-def wait_for_server(port: int, timeout: float = 10.0):
+def wait_for_server(port: int, timeout: float = 60.0):
+    """Wait for server to become ready. Longer timeout for frozen app cold starts."""
     start = time.time()
     while time.time() - start < timeout:
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=0.5):
                 return True
         except (ConnectionRefusedError, OSError):
-            time.sleep(0.1)
+            time.sleep(0.3)
     return False
 
 
-def main():
-    port = find_free_port(settings.port)
-
-    # Start FastAPI in background thread
+def start_server_and_watchers(port: int):
     from api import app
     server_thread = threading.Thread(
         target=uvicorn.run,
@@ -45,37 +42,58 @@ def main():
     )
     server_thread.start()
 
-    # Start file watcher in background thread
     watcher_thread = threading.Thread(target=start_all_watchers, daemon=True)
     watcher_thread.start()
 
-    # Wait for server to be ready
+
+def main():
+    import sys
+    port = find_free_port(settings.port)
+
+    start_server_and_watchers(port)
+
     if not wait_for_server(port):
         print(f"Server did not start on port {port}")
         return
 
     url = f"http://127.0.0.1:{port}"
-    print(f"App running at {url}")
 
-    # Open in pywebview native window
-    try:
-        window = webview.create_window(
-            "Screenshot Notes",
-            url,
-            width=1200,
-            height=800,
-            min_size=(800, 600)
-        )
-        webview.start()
-    except Exception as e:
-        print(f"pywebview failed ({e}), opening in browser instead")
-        webbrowser.open(url)
-        # Keep alive
+    # --- macOS packaged app: run as a menu bar app ---
+    if getattr(sys, "frozen", False):
         try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            pass
+            import rumps
+
+            class FlashNoteMenuBar(rumps.App):
+                def __init__(self):
+                    super().__init__("FlashNote", title="📒 FlashNote")
+                    self.url = url
+                    self.menu = [
+                        rumps.MenuItem("Open FlashNote", callback=self.open_browser),
+                        None,
+                        rumps.MenuItem("Quit", callback=self.quit_app),
+                    ]
+                    # Open browser on launch
+                    webbrowser.open(self.url)
+
+                def open_browser(self, _):
+                    webbrowser.open(self.url)
+
+                def quit_app(self, _):
+                    rumps.quit_application()
+
+            FlashNoteMenuBar().run()
+            return
+        except Exception as e:
+            print(f"Menu bar error: {e}")
+
+    # --- Dev mode: just open browser and keep alive ---
+    print(f"FlashNote running at {url}")
+    webbrowser.open(url)
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Shutting down.")
 
 
 if __name__ == "__main__":
