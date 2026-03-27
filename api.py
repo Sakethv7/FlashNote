@@ -453,20 +453,51 @@ async def auto_group_status(batch_id: str):
 
 # ── Local embedding model (loaded once, reused) ───────────────────────────────
 _embed_model = None
+def _get_hf_embeddings(texts: list[str]) -> list[list[float]] | None:
+    """
+    Get embeddings via HuggingFace Inference API (router).
+    Falls back to TF-IDF if token lacks inference permissions.
+    """
+    import os, requests
+    hf_key = os.environ.get("HF_API_KEY", "")
+    if not hf_key:
+        return None
+
+    # Try HF router (new endpoint as of 2025)
+    url = "https://router.huggingface.co/hf-inference/pipeline/feature-extraction/sentence-transformers/all-MiniLM-L6-v2"
+    try:
+        resp = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {hf_key}"},
+            json={"inputs": texts, "options": {"wait_for_model": True}},
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            if isinstance(data, list) and len(data) == len(texts):
+                print(f"[embed] HF router OK — dim {len(data[0])}")
+                return data
+        print(f"[embed] HF router {resp.status_code}: {resp.text[:150]} — falling back to TF-IDF")
+    except Exception as e:
+        print(f"[embed] HF request failed: {e} — falling back to TF-IDF")
+
+    return None
+
+
+def _tfidf_embeddings(texts: list[str]) -> list[list[float]]:
+    """
+    Zero-dependency TF-IDF embeddings using sklearn.
+    No API, no download — works offline. Good enough for topic clustering.
+    """
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    vec = TfidfVectorizer(max_features=512, stop_words="english", ngram_range=(1, 2))
+    mat = vec.fit_transform(texts)
+    return mat.toarray().tolist()
+
+
 def _get_embed_model():
-    """Lazy-load sentence-transformer. Uses Mac Metal (MPS) if available."""
-    global _embed_model
-    if _embed_model is None:
-        try:
-            from sentence_transformers import SentenceTransformer
-            import torch
-            device = "mps" if torch.backends.mps.is_available() else "cpu"
-            _embed_model = SentenceTransformer("all-MiniLM-L6-v2", device=device)
-            print(f"[embed] Loaded all-MiniLM-L6-v2 on {device}")
-        except Exception as e:
-            print(f"[embed] Failed to load model: {e}")
-            _embed_model = None
-    return _embed_model
+    """Returns None — we use HF Inference API instead of local model."""
+    return None
 
 
 def _group_by_similarity(pool: list[dict], target_groups: int) -> list[list[int]]:
@@ -483,8 +514,7 @@ def _group_by_similarity(pool: list[dict], target_groups: int) -> list[list[int]
     from sklearn.cluster import AgglomerativeClustering
     from sklearn.preprocessing import normalize
 
-    model = _get_embed_model()
-    if model is None or len(pool) < 2:
+    if len(pool) < 2:
         return [list(range(len(pool)))]
 
     def _strip_fm(md: str) -> str:
@@ -499,9 +529,17 @@ def _group_by_similarity(pool: list[dict], target_groups: int) -> list[list[int]
         body = _strip_fm(n.get("draft_markdown", ""))
         texts.append(f"{n.get('title', '')} {body[:400]}")
 
-    # Encode to dense vectors — this is the "compression" step analogous to PolarQuant
-    embeddings = model.encode(texts, batch_size=32, show_progress_bar=False)
-    # L2-normalize so cosine similarity = dot product (like QJL sign normalization)
+    # Get embeddings: try HF API first, fall back to TF-IDF (no download needed)
+    import numpy as np
+    raw_embeddings = _get_hf_embeddings(texts)
+    if raw_embeddings is not None:
+        print(f"[embed] Using HF semantic embeddings for {len(texts)} notes")
+        embeddings = np.array(raw_embeddings, dtype=float)
+    else:
+        print(f"[embed] Using TF-IDF embeddings for {len(texts)} notes (offline mode)")
+        embeddings = np.array(_tfidf_embeddings(texts), dtype=float)
+
+    # L2-normalize so cosine similarity = dot product
     embeddings = normalize(embeddings, norm="l2")
 
     # Cosine distance threshold: merge if similarity > 0.65 (empirically good for study notes)
