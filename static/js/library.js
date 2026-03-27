@@ -309,6 +309,39 @@ function onLibSearch(val) {
 }
 
 
+// ── Lightbox ──────────────────────────────────────────────────────────────────
+let _lbNoteId = null, _lbIdx = 0, _lbTotal = 0;
+
+function openLightbox(noteId, idx, total) {
+  _lbNoteId = noteId; _lbIdx = idx; _lbTotal = total;
+  const lb  = document.getElementById('lib-lightbox');
+  const img = document.getElementById('lib-lightbox-img');
+  const err = document.getElementById('lib-lightbox-error');
+  const cap = document.getElementById('lib-lightbox-caption');
+  lb.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  err.style.display = 'none';
+  img.style.display = 'block';
+  img.src = `/api/image-raw/${noteId}?idx=${idx}`;
+  img.onerror = () => { img.style.display = 'none'; err.style.display = 'block'; };
+  cap.textContent = total > 1 ? `Source ${idx + 1} of ${total}` : 'Source image';
+  document.addEventListener('keydown', _lbKeyHandler);
+}
+
+function closeLightbox() {
+  document.getElementById('lib-lightbox').style.display = 'none';
+  document.body.style.overflow = '';
+  document.getElementById('lib-lightbox-img').src = '';
+  document.removeEventListener('keydown', _lbKeyHandler);
+}
+
+function _lbKeyHandler(e) {
+  if (e.key === 'Escape')      closeLightbox();
+  if (e.key === 'ArrowRight' && _lbIdx < _lbTotal - 1) openLightbox(_lbNoteId, _lbIdx + 1, _lbTotal);
+  if (e.key === 'ArrowLeft'  && _lbIdx > 0)             openLightbox(_lbNoteId, _lbIdx - 1, _lbTotal);
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
