@@ -451,10 +451,112 @@ async def auto_group_status(batch_id: str):
     return _auto_group_status.get(batch_id, {"status": "unknown"})
 
 
+# ── Local embedding model (loaded once, reused) ───────────────────────────────
+_embed_model = None
+def _get_embed_model():
+    """Lazy-load sentence-transformer. Uses Mac Metal (MPS) if available."""
+    global _embed_model
+    if _embed_model is None:
+        try:
+            from sentence_transformers import SentenceTransformer
+            import torch
+            device = "mps" if torch.backends.mps.is_available() else "cpu"
+            _embed_model = SentenceTransformer("all-MiniLM-L6-v2", device=device)
+            print(f"[embed] Loaded all-MiniLM-L6-v2 on {device}")
+        except Exception as e:
+            print(f"[embed] Failed to load model: {e}")
+            _embed_model = None
+    return _embed_model
+
+
+def _group_by_similarity(pool: list[dict], target_groups: int) -> list[list[int]]:
+    """
+    Local semantic clustering — no API calls.
+
+    Inspired by TurboQuant: compress note content into dense vectors (embeddings),
+    then compute cosine similarity matrix. Notes with high similarity get merged.
+    Uses AgglomerativeClustering (bottom-up, like TurboQuant's two-stage approach)
+    with cosine distance threshold instead of fixed cluster count, so naturally
+    similar notes merge and dissimilar ones stay separate.
+    """
+    import numpy as np
+    from sklearn.cluster import AgglomerativeClustering
+    from sklearn.preprocessing import normalize
+
+    model = _get_embed_model()
+    if model is None or len(pool) < 2:
+        return [list(range(len(pool)))]
+
+    def _strip_fm(md: str) -> str:
+        if md.startswith("---"):
+            end = md.find("---", 3)
+            return md[end+3:].strip() if end != -1 else md
+        return md
+
+    # Build text representation: title + first 400 chars of body
+    texts = []
+    for n in pool:
+        body = _strip_fm(n.get("draft_markdown", ""))
+        texts.append(f"{n.get('title', '')} {body[:400]}")
+
+    # Encode to dense vectors — this is the "compression" step analogous to PolarQuant
+    embeddings = model.encode(texts, batch_size=32, show_progress_bar=False)
+    # L2-normalize so cosine similarity = dot product (like QJL sign normalization)
+    embeddings = normalize(embeddings, norm="l2")
+
+    # Cosine distance threshold: merge if similarity > 0.65 (empirically good for study notes)
+    # AgglomerativeClustering with distance_threshold groups without needing fixed n_clusters
+    distance_threshold = 0.35  # cosine distance = 1 - similarity; 0.35 ≈ similarity 0.65
+    clustering = AgglomerativeClustering(
+        n_clusters=None,
+        distance_threshold=distance_threshold,
+        metric="cosine",
+        linkage="average",
+    )
+    labels = clustering.fit_predict(embeddings)
+
+    # If threshold produced too many singleton groups, fall back to fixed target_groups
+    unique_labels = set(labels)
+    if len(unique_labels) > target_groups * 2:
+        clustering = AgglomerativeClustering(
+            n_clusters=max(1, target_groups),
+            metric="cosine",
+            linkage="average",
+        )
+        labels = clustering.fit_predict(embeddings)
+        unique_labels = set(labels)
+
+    groups = {}
+    for i, label in enumerate(labels):
+        groups.setdefault(int(label), []).append(i)
+
+    return [g for g in groups.values() if len(g) >= 2]
+
+
+def _claude_with_retry(client, max_retries: int = 5, **kwargs):
+    """Call Claude with exponential backoff on 529 overloaded errors."""
+    import time, random
+    import anthropic as _ant
+    for attempt in range(max_retries):
+        try:
+            return client.messages.create(**kwargs)
+        except _ant.APIStatusError as e:
+            if e.status_code in (529, 529) and attempt < max_retries - 1:
+                delay = (2 ** attempt) + random.random()
+                print(f"[claude] Overloaded, retry {attempt+1}/{max_retries} in {delay:.1f}s")
+                time.sleep(delay)
+            else:
+                raise
+    raise RuntimeError("Claude API unavailable after retries")
+
+
 @app.post("/api/queue/smart-merge")
 async def smart_merge_notes(course_name: str = None, module_name: str = None):
-    """Merge already-processed notes that cover the same topic into consolidated notes."""
-    import anthropic as _ant, json as _json, threading
+    """
+    Merge related notes using local semantic embeddings for grouping
+    (no API call) + Claude with retry for writing the merged note.
+    """
+    import anthropic as _ant, threading
 
     pool = [n for n in queue_store.filter(course_name=course_name, module_name=module_name)
             if n.get("status") in ("in_review", "pending", "approved")
@@ -464,89 +566,63 @@ async def smart_merge_notes(course_name: str = None, module_name: str = None):
         return {"status": "skipped", "message": "Need at least 2 notes with content to merge."}
 
     target_groups = max(1, len(pool) // 3)
-
-    # Build a summary of each note for Claude (title + first 300 chars of content)
-    summaries = []
-    for i, n in enumerate(pool):
-        md = n.get("draft_markdown", "")
-        # Strip frontmatter
-        body = md
-        if md.startswith("---"):
-            end = md.find("---", 3)
-            body = md[end+3:].strip() if end != -1 else md
-        preview = body[:300].replace("\n", " ")
-        summaries.append(f"Note {i} [{n.get('title', 'Untitled')}]: {preview}")
-
-    prompt = (
-        f"You have {len(pool)} study notes from the same course module. "
-        f"Group them into approximately {target_groups} merged notes by combining notes that cover the same concept or topic.\n\n"
-        + "\n".join(summaries)
-        + f"\n\nReturn ONLY valid JSON — a list of lists of 0-based indices. "
-          f"Aim for {target_groups} groups. Example: [[0,1,2],[3,4],[5,6,7]]"
-    )
-
     merge_id = str(uuid.uuid4())[:8]
     _auto_group_status[merge_id] = {"status": "merging", "total": len(pool), "done": 0}
 
-    def _do_merge(pool, prompt, mid):
+    def _do_merge(pool, mid):
         try:
-            client = _ant.Anthropic()
-            msg = client.messages.create(
-                model="claude-3-haiku-20240307",
-                max_tokens=1024,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            raw = msg.content[0].text.strip()
-            start = raw.find("[["); end = raw.rfind("]]") + 2
-            if start == -1: raise ValueError("No JSON array")
-            groups_idx = _json.loads(raw[start:end])
+            # STEP 1: Group by semantic similarity — purely local, zero API calls
+            groups_idx = _group_by_similarity(pool, target_groups)
+            print(f"[smart-merge] {len(pool)} notes → {len(groups_idx)} merge group(s)")
 
+            if not groups_idx:
+                _auto_group_status[mid] = {"status": "done", "message": "Notes are too dissimilar to merge."}
+                return
+
+            client = _ant.Anthropic()
+
+            def strip_fm(md):
+                if md.startswith("---"):
+                    end = md.find("---", 3)
+                    return md[end+3:].strip() if end != -1 else md
+                return md
+
+            # STEP 2: For each group, ask Claude to write one merged note (with retry)
             for grp in groups_idx:
-                if len(grp) < 2:
-                    continue  # single note, skip
                 primary = pool[grp[0]]
                 titles = [pool[i].get("title", f"Note {i}") for i in grp]
                 images = []
                 for i in grp:
                     images.extend(pool[i].get("image_paths", []))
-
-                # Strip frontmatter from each note body
-                def strip_fm(md):
-                    if md.startswith("---"):
-                        end = md.find("---", 3)
-                        return md[end+3:].strip() if end != -1 else md
-                    return md
-
                 bodies = [strip_fm(pool[i].get("draft_markdown", "")) for i in grp if pool[i].get("draft_markdown")]
 
-                # Ask Claude to write one coherent merged note
                 merge_prompt = (
                     f"You are merging {len(bodies)} study notes that cover overlapping topics into ONE comprehensive, well-structured note.\n\n"
-                    f"Source notes:\n"
+                    "Source notes:\n"
                     + "\n\n---\n\n".join(f"**{titles[j]}**\n{bodies[j]}" for j in range(len(bodies)))
                     + "\n\n"
                     "Write a single cohesive study note that:\n"
                     "- Has a concise title summarising the combined topic\n"
                     "- Eliminates redundancy but preserves all unique insights\n"
                     "- Uses clear headings, bullet points, and wikilinks [[Like This]]\n"
-                    "- Includes a Mermaid diagram if helpful\n\n"
-                    "Return ONLY the merged markdown note starting with a YAML frontmatter block:\n"
+                    "- Includes a Mermaid diagram if the topic benefits from one\n\n"
+                    "Return ONLY the merged markdown starting with YAML frontmatter:\n"
                     "---\ntitle: <merged title>\n---\n\n<body>"
                 )
-                merge_msg = client.messages.create(
+
+                merge_msg = _claude_with_retry(
+                    client,
                     model="claude-3-haiku-20240307",
                     max_tokens=4096,
                     messages=[{"role": "user", "content": merge_prompt}]
                 )
                 merged_md = merge_msg.content[0].text.strip()
 
-                # Extract title from frontmatter
                 merged_title = " + ".join(titles)
                 if merged_md.startswith("---"):
                     fm_end = merged_md.find("---", 3)
                     if fm_end != -1:
-                        fm_block = merged_md[3:fm_end]
-                        for line in fm_block.splitlines():
+                        for line in merged_md[3:fm_end].splitlines():
                             if line.lower().startswith("title:"):
                                 merged_title = line.split(":", 1)[1].strip().strip('"')
                                 break
@@ -563,7 +639,6 @@ async def smart_merge_notes(course_name: str = None, module_name: str = None):
                     "merged_from": [pool[i].get("note_id") for i in grp],
                     "draft_markdown": merged_md,
                 })
-                # Remove originals
                 for i in grp:
                     try: queue_store.remove(pool[i]["note_id"])
                     except: pass
@@ -575,7 +650,7 @@ async def smart_merge_notes(course_name: str = None, module_name: str = None):
             print(f"[smart-merge] {e}\n{traceback.format_exc()}")
             _auto_group_status[mid] = {"status": "error", "message": str(e)}
 
-    threading.Thread(target=_do_merge, args=(pool, prompt, merge_id), daemon=True).start()
+    threading.Thread(target=_do_merge, args=(pool, merge_id), daemon=True).start()
     return {"status": "merging", "merge_id": merge_id, "notes_in_pool": len(pool), "target_groups": target_groups}
 
 
