@@ -354,7 +354,10 @@
 
       <!-- Fields -->
       <div class="field">
-        <label>Course <span style="color:var(--danger);">*</span></label>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <label style="margin:0;">Course <span style="color:var(--danger);">*</span></label>
+          <button type="button" id="auto-detect-btn" onclick="autoDetectPlacement()" style="font-size:11px;font-weight:600;color:var(--accent);background:var(--accent-subtle);border:1px solid var(--accent);border-radius:6px;padding:3px 10px;cursor:pointer;display:none;" title="Let AI look at your images and suggest the right course & module">✦ Auto-detect</button>
+        </div>
         <input type="text" id="course-input" placeholder="e.g. Agentic AI, System Design…" autocomplete="off" list="course-suggestions" />
         <datalist id="course-suggestions"></datalist>
       </div>
@@ -559,8 +562,35 @@
     function checkReady() {
       const course = document.getElementById('course-input').value.trim();
       document.getElementById('upload-btn').disabled = !(queue.length > 0 && course);
+      // Show auto-detect button only when there are images in the queue
+      const hasImages = queue.some(i => !i.isDoc);
+      document.getElementById('auto-detect-btn').style.display = hasImages ? '' : 'none';
     }
     document.getElementById('course-input').addEventListener('input', checkReady);
+
+    async function autoDetectPlacement() {
+      const btn = document.getElementById('auto-detect-btn');
+      const hasImages = queue.some(i => !i.isDoc);
+      if (!hasImages) return;
+      btn.textContent = '…'; btn.disabled = true;
+      try {
+        const form = new FormData();
+        queue.filter(i => !i.isDoc).slice(0, 3).forEach(i => form.append('files', i.file));
+        const res = await fetch('/api/suggest-placement', { method: 'POST', body: form });
+        const data = await res.json();
+        if (data.course) {
+          document.getElementById('course-input').value = data.course;
+          document.getElementById('course-input').dispatchEvent(new Event('input')); // trigger module hints
+          if (data.module) document.getElementById('module-input').value = data.module;
+        }
+        btn.textContent = data.course ? '✓ Done' : '✦ Auto-detect';
+        setTimeout(() => { btn.textContent = '✦ Auto-detect'; }, 2000);
+      } catch {
+        btn.textContent = '✦ Auto-detect';
+      }
+      btn.disabled = false;
+      checkReady();
+    }
 
     // ─── Upload ───
     async function doUpload() {

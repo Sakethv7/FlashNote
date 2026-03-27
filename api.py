@@ -227,6 +227,84 @@ def _auto_group_images(image_paths: list[str], context_text: str = "") -> list[l
         return [[p] for p in image_paths]
 
 
+@app.post("/api/suggest-placement")
+async def suggest_placement(files: list[UploadFile] = File(default=[])):
+    """Look at uploaded images and suggest the best matching course + module from existing notes."""
+    import anthropic, base64, json as _json, tempfile, os as _os
+
+    # Build course→module map from existing approved notes
+    existing = queue_store.list_all()
+    structure: dict[str, set] = {}
+    for n in existing:
+        if n.get("status") != "approved":
+            continue
+        c = n.get("course_name", "").strip()
+        m = n.get("module_name", "").strip()
+        if c:
+            structure.setdefault(c, set())
+            if m:
+                structure[c].add(m)
+
+    if not structure:
+        return {"course": "", "module": "", "reason": "No existing notes to match against."}
+
+    structure_text = "\n".join(
+        f"- {c}: {', '.join(sorted(ms)) if ms else '(no modules yet)'}"
+        for c, ms in sorted(structure.items())
+    )
+
+    # Save uploaded images to temp files and resize for cheap vision call
+    tmp_paths = []
+    try:
+        for f in files[:3]:  # max 3 images for cost
+            ext = (f.filename or "img").split(".")[-1].lower()
+            if ext not in ("jpg", "jpeg", "png", "gif", "webp"):
+                continue
+            data = await f.read()
+            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}")
+            tmp.write(data)
+            tmp.close()
+            tmp_paths.append(tmp.name)
+
+        if not tmp_paths:
+            return {"course": "", "module": "", "reason": "No image files to analyse."}
+
+        content = []
+        for path in tmp_paths:
+            img_bytes = _resize_image_for_grouping(path, max_px=512)
+            content.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(img_bytes).decode()}
+            })
+
+        content.append({
+            "type": "text",
+            "text": (
+                "These are study notes/screenshots. Based on their content, which existing course and module do they best fit into?\n\n"
+                f"Existing structure:\n{structure_text}\n\n"
+                "Reply with JSON only, no explanation: {\"course\": \"<exact course name>\", \"module\": \"<exact module name or empty string>\", \"reason\": \"<one sentence>\"}"
+            )
+        })
+
+        client = anthropic.Anthropic()
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=256,
+            messages=[{"role": "user", "content": content}]
+        )
+        raw = msg.content[0].text.strip()
+        start = raw.find("{")
+        end = raw.rfind("}") + 1
+        result = _json.loads(raw[start:end])
+        return result
+    except Exception as e:
+        return {"course": "", "module": "", "reason": f"Could not detect: {e}"}
+    finally:
+        for p in tmp_paths:
+            try: _os.unlink(p)
+            except: pass
+
+
 @app.post("/api/upload")
 async def upload_photo(
     files: list[UploadFile] = File(default=[]),
