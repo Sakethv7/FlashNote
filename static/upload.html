@@ -361,7 +361,8 @@
 
       <div class="field">
         <label>Module <span style="color:var(--muted);font-weight:400;">(optional)</span></label>
-        <input type="text" id="module-input" placeholder="e.g. Module 1, Week 2…" autocomplete="off" />
+        <input type="text" id="module-input" placeholder="e.g. Module 1, Week 2…" autocomplete="off" list="module-suggestions" />
+        <datalist id="module-suggestions"></datalist>
         <span class="hint">Each photo saves as a separate note in this module.</span>
       </div>
 
@@ -452,15 +453,38 @@
       document.getElementById('group-field').style.display = hasImages ? '' : 'none';
     }
 
-    // ─── Load course suggestions ───
-    async function loadCourses() {
+    // ─── Load course + module suggestions from library ───
+    let courseModuleMap = {}; // { "Phase 4 - Agentic AI": ["Module 1", "Module 2", ...] }
+
+    async function loadHints() {
       try {
-        const res = await fetch('/api/courses');
-        const courses = await res.json();
-        const dl = document.getElementById('course-suggestions');
-        dl.innerHTML = courses.map(c => `<option value="${c.course_name}"></option>`).join('');
+        const res = await fetch('/api/library');
+        const notes = await res.json();
+        courseModuleMap = {};
+        for (const n of notes) {
+          const c = n.course_name || '';
+          const m = n.module_name || '';
+          if (!c) continue;
+          if (!courseModuleMap[c]) courseModuleMap[c] = new Set();
+          if (m) courseModuleMap[c].add(m);
+        }
+        // Populate course datalist
+        const courses = Object.keys(courseModuleMap).sort();
+        const cdl = document.getElementById('course-suggestions');
+        cdl.innerHTML = courses.map(c => `<option value="${c}"></option>`).join('');
+        // Prime modules for whatever course is already typed
+        updateModuleSuggestions();
       } catch {}
     }
+
+    function updateModuleSuggestions() {
+      const course = document.getElementById('course-input').value.trim();
+      const modules = [...(courseModuleMap[course] || [])].sort();
+      const mdl = document.getElementById('module-suggestions');
+      mdl.innerHTML = modules.map(m => `<option value="${m}"></option>`).join('');
+    }
+
+    document.getElementById('course-input').addEventListener('input', updateModuleSuggestions);
 
     // ─── Add files to queue ───
     function addFiles(fileList) {
@@ -646,7 +670,7 @@
       renderStrip();
     }
 
-    loadCourses();
+    loadHints();
     renderStrip();
   </script>
 </body>
