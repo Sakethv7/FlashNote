@@ -1003,14 +1003,12 @@ async function fetchQueue() {
         <span class="ft-badge">${totalNotes}</span>
         <button class="ft-consolidate ft-row-consolidate" title="Consolidate duplicates in this course (AI)">🔀</button>
         <button class="ft-smartorder ft-row-smartorder" title="Smart order notes in this course (AI)">🗂</button>
-        <button class="ft-smartmerge ft-row-smartmerge" title="Smart merge similar notes into fewer dense notes (AI)">⊕</button>
         <button class="ft-approve ft-row-approve" title="Approve all in this course">✓</button>
         <button class="ft-regen ft-row-regen" title="Regenerate all in this course">↻</button>
         <button class="ft-trash ft-row-trash" title="Delete all in this course">🗑</button>
       `;
       courseRow.querySelector('.ft-consolidate').addEventListener('click', e => { e.stopPropagation(); consolidateBulk(course, undefined, course, e.currentTarget); });
       courseRow.querySelector('.ft-smartorder').addEventListener('click', e => { e.stopPropagation(); smartOrderBulk(course, undefined, e.currentTarget); });
-      courseRow.querySelector('.ft-smartmerge').addEventListener('click', e => { e.stopPropagation(); smartMergeBulk(course, undefined, e.currentTarget); });
       courseRow.querySelector('.ft-approve').addEventListener('click', e => { e.stopPropagation(); approveBulk(course, undefined, course, e.currentTarget); });
       courseRow.querySelector('.ft-regen').addEventListener('click', e => { e.stopPropagation(); regenBulk(course, undefined, course, e.currentTarget); });
       courseRow.querySelector('.ft-trash').addEventListener('click', e => { e.stopPropagation(); deleteBulk(course, undefined, course, e.currentTarget); });
@@ -1046,14 +1044,12 @@ async function fetchQueue() {
             <span class="ft-badge">${modNotes.length}</span>
             <button class="ft-consolidate ft-row-consolidate" title="Consolidate duplicates in this module (AI)">🔀</button>
             <button class="ft-smartorder ft-row-smartorder" title="Smart order notes in this module (AI)">🗂</button>
-            <button class="ft-smartmerge ft-row-smartmerge" title="Smart merge similar notes into fewer dense notes (AI)">⊕</button>
             <button class="ft-approve ft-row-approve" title="Approve all in this module">✓</button>
             <button class="ft-regen ft-row-regen" title="Regenerate all in this module">↻</button>
             <button class="ft-trash ft-row-trash" title="Delete all in this module">🗑</button>
           `;
           modRow.querySelector('.ft-consolidate').addEventListener('click', e => { e.stopPropagation(); consolidateBulk(course, mod, mod, e.currentTarget); });
           modRow.querySelector('.ft-smartorder').addEventListener('click', e => { e.stopPropagation(); smartOrderBulk(course, mod, e.currentTarget); });
-          modRow.querySelector('.ft-smartmerge').addEventListener('click', e => { e.stopPropagation(); smartMergeBulk(course, mod, e.currentTarget); });
           modRow.querySelector('.ft-approve').addEventListener('click', e => { e.stopPropagation(); approveBulk(course, mod, mod, e.currentTarget); });
           modRow.querySelector('.ft-regen').addEventListener('click', e => { e.stopPropagation(); regenBulk(course, mod, mod, e.currentTarget); });
           modRow.querySelector('.ft-trash').addEventListener('click', e => { e.stopPropagation(); deleteBulk(course, mod, mod, e.currentTarget); });
