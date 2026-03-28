@@ -18,6 +18,64 @@ MAX_GROUP_SIZE = 5
 _watchers: dict = {}
 _lock = threading.Lock()
 
+# Debounced auto-smart-order: keyed by "course::module"
+# After any note finishes, we wait 30s then run smart order once for that module.
+# If another note in the same module finishes within 30s, the timer resets.
+_smart_order_timers: dict[str, threading.Timer] = {}
+_smart_order_lock = threading.Lock()
+
+
+def _run_auto_smart_order(course_name: str, module_name: str):
+    """Run smart order for a course/module using Claude Haiku. Called after debounce."""
+    import anthropic as _ant, json as _j
+    key = f"{course_name}::{module_name}"
+    notes = queue_store.filter(course_name=course_name, module_name=module_name)
+    notes = [n for n in notes if n.get("draft_markdown", "").strip()]
+    if len(notes) < 2:
+        return
+    summaries = []
+    for i, n in enumerate(notes):
+        md = (n.get("draft_markdown") or "").strip()
+        first_line = next((l.strip() for l in md.splitlines() if l.strip() and not l.startswith("#")), "")
+        summaries.append(f"{i}: {n.get('title', 'Untitled')} — {first_line[:150]}")
+    prompt = (
+        "Below are study notes from a course module. Suggest the best logical reading order "
+        "(chronological / conceptual build-up). Return ONLY a JSON array of the original indices "
+        "in your suggested order, e.g. [2, 0, 3, 1].\n\nNotes:\n" + "\n".join(summaries)
+    )
+    try:
+        client = _ant.Anthropic()
+        msg = client.messages.create(
+            model="claude-3-haiku-20240307",
+            max_tokens=256,
+            messages=[{"role": "user", "content": prompt}]
+        )
+        raw = msg.content[0].text.strip()
+        start, end = raw.find("["), raw.rfind("]") + 1
+        order = _j.loads(raw[start:end])
+        if sorted(order) != list(range(len(notes))):
+            raise ValueError("Invalid permutation")
+        updates = {notes[orig_idx]["note_id"]: {"sequence": seq_pos}
+                   for seq_pos, orig_idx in enumerate(order)}
+        queue_store.batch_update(updates)
+        print(f"[auto-smart-order] {key} → sequenced {len(notes)} notes")
+    except Exception as e:
+        print(f"[auto-smart-order] {key} failed: {e}")
+
+
+def _schedule_smart_order(course_name: str, module_name: str):
+    """Debounce: reset the 30s timer each time a note finishes in this module."""
+    key = f"{course_name}::{module_name}"
+    with _smart_order_lock:
+        existing = _smart_order_timers.get(key)
+        if existing:
+            existing.cancel()
+        t = threading.Timer(30.0, _run_auto_smart_order, args=(course_name, module_name))
+        t.daemon = True
+        _smart_order_timers[key] = t
+        t.start()
+    print(f"[auto-smart-order] scheduled for {key} in 30s")
+
 
 def _make_initial_state(image_paths: list[str], course, module_name: str = "", user_notes: str = "") -> dict:
     """Factory for the initial NoteState dict passed to the pipeline."""
@@ -66,6 +124,11 @@ def _run_pipeline(initial_state: dict):
             "loop_count": result.get("loop_count", 0),
             "status": "in_review",
         })
+        # Auto smart-order: debounced 30s after last note in this module finishes
+        _schedule_smart_order(
+            initial_state.get("course_name", ""),
+            initial_state.get("module_name", "")
+        )
         return result
     except Exception as e:
         print(f"Pipeline error for note {note_id}: {e}")
