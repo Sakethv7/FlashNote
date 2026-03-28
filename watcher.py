@@ -18,32 +18,64 @@ MAX_GROUP_SIZE = 5
 _watchers: dict = {}
 _lock = threading.Lock()
 
-# Debounced auto-smart-order: keyed by "course::module"
-# After any note finishes, we wait 30s then run smart order once for that module.
+# Debounced auto smart process: keyed by "course::module"
+# After any note finishes, wait 30s then run full smart process (consolidate → order).
 # If another note in the same module finishes within 30s, the timer resets.
 _smart_order_timers: dict[str, threading.Timer] = {}
 _smart_order_lock = threading.Lock()
 
 
-def _run_auto_smart_order(course_name: str, module_name: str):
-    """Run smart order for a course/module using Claude Haiku. Called after debounce."""
+def _run_auto_smart_process(course_name: str, module_name: str):
+    """
+    Full auto smart process fired after upload debounce (30s):
+    Step 1: consolidate (merge duplicates)
+    Step 2: smart order (sequence logically)
+    """
     import anthropic as _ant, json as _j
+    from nodes import consolidate_module_notes
     key = f"{course_name}::{module_name}"
-    notes = queue_store.filter(course_name=course_name, module_name=module_name)
-    notes = [n for n in notes if n.get("draft_markdown", "").strip()]
-    if len(notes) < 2:
-        return
-    summaries = []
-    for i, n in enumerate(notes):
-        md = (n.get("draft_markdown") or "").strip()
-        first_line = next((l.strip() for l in md.splitlines() if l.strip() and not l.startswith("#")), "")
-        summaries.append(f"{i}: {n.get('title', 'Untitled')} — {first_line[:150]}")
-    prompt = (
-        "Below are study notes from a course module. Suggest the best logical reading order "
-        "(chronological / conceptual build-up). Return ONLY a JSON array of the original indices "
-        "in your suggested order, e.g. [2, 0, 3, 1].\n\nNotes:\n" + "\n".join(summaries)
-    )
+    print(f"[auto-smart] starting for {key}")
+
+    # ── Step 1: Consolidate ──
     try:
+        eligible = [
+            n for n in queue_store.filter(course_name=course_name, module_name=module_name)
+            if n.get("status") in ("in_review", "approved") and n.get("draft_markdown", "").strip()
+        ]
+        if len(eligible) >= 2:
+            actions = consolidate_module_notes(eligible)
+            for act in actions:
+                if act["action"] == "merge":
+                    queue_store.update(act["primary"], {
+                        "draft_markdown": act["merged_markdown"],
+                        "title": act.get("merged_title", "Merged Note"),
+                        "status": "in_review",
+                    })
+                    for nid in act.get("delete", []):
+                        queue_store.remove(nid)
+                elif act["action"] == "delete":
+                    for nid in act.get("note_ids", []):
+                        queue_store.remove(nid)
+            print(f"[auto-smart] {key} consolidate done — {len(actions)} actions")
+    except Exception as e:
+        print(f"[auto-smart] {key} consolidate failed: {e}")
+
+    # ── Step 2: Smart Order ──
+    try:
+        notes = queue_store.filter(course_name=course_name, module_name=module_name)
+        notes = [n for n in notes if n.get("draft_markdown", "").strip()]
+        if len(notes) < 2:
+            return
+        summaries = []
+        for i, n in enumerate(notes):
+            md = (n.get("draft_markdown") or "").strip()
+            first_line = next((l.strip() for l in md.splitlines() if l.strip() and not l.startswith("#")), "")
+            summaries.append(f"{i}: {n.get('title', 'Untitled')} — {first_line[:150]}")
+        prompt = (
+            "Below are study notes from a course module. Suggest the best logical reading order "
+            "(chronological / conceptual build-up). Return ONLY a JSON array of the original indices "
+            "in your suggested order, e.g. [2, 0, 3, 1].\n\nNotes:\n" + "\n".join(summaries)
+        )
         client = _ant.Anthropic()
         msg = client.messages.create(
             model="claude-3-haiku-20240307",
@@ -58,9 +90,9 @@ def _run_auto_smart_order(course_name: str, module_name: str):
         updates = {notes[orig_idx]["note_id"]: {"sequence": seq_pos}
                    for seq_pos, orig_idx in enumerate(order)}
         queue_store.batch_update(updates)
-        print(f"[auto-smart-order] {key} → sequenced {len(notes)} notes")
+        print(f"[auto-smart] {key} → sequenced {len(notes)} notes")
     except Exception as e:
-        print(f"[auto-smart-order] {key} failed: {e}")
+        print(f"[auto-smart] {key} smart order failed: {e}")
 
 
 def _schedule_smart_order(course_name: str, module_name: str):
@@ -70,11 +102,11 @@ def _schedule_smart_order(course_name: str, module_name: str):
         existing = _smart_order_timers.get(key)
         if existing:
             existing.cancel()
-        t = threading.Timer(30.0, _run_auto_smart_order, args=(course_name, module_name))
+        t = threading.Timer(30.0, _run_auto_smart_process, args=(course_name, module_name))
         t.daemon = True
         _smart_order_timers[key] = t
         t.start()
-    print(f"[auto-smart-order] scheduled for {key} in 30s")
+    print(f"[auto-smart] scheduled for {key} in 30s")
 
 
 def _make_initial_state(image_paths: list[str], course, module_name: str = "", user_notes: str = "") -> dict:
