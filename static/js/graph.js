@@ -15,6 +15,7 @@ let graphEdges = [];
 let allNotes   = [];
 let animFrameId = null;
 let dragNode    = null;
+let hoveredNode = null;
 let courseColorMap = {};
 let courseList  = [];
 let canvasInitialized = false;
@@ -64,6 +65,7 @@ function initCanvas() {
     const { x, y } = canvasXY(e, canvas);
     if (dragNode) { dragNode.x = x; dragNode.y = y; dragNode.vx = 0; dragNode.vy = 0; return; }
     const hit = hitTest(x, y);
+    hoveredNode = hit;
     canvas.style.cursor = hit ? 'pointer' : 'default';
     if (hit) {
       tooltip.textContent = hit.isWiki
@@ -280,7 +282,8 @@ function buildGraph(notes) {
     });
   });
 
-  const wikiNodes = [...wikiMap.values()];
+  // Only keep wikilinks referenced by 2+ notes — these are real concept hubs
+  const wikiNodes = [...wikiMap.values()].filter(w => w.noteCount >= 2);
   // Scale wiki node size by how many notes reference it (more refs = bigger)
   wikiNodes.forEach(w => { w.r = Math.min(6 + w.noteCount * 2, 14); });
 
@@ -438,14 +441,16 @@ function renderGraph() {
     ctx.lineWidth = 1.8;
     ctx.stroke();
 
-    // Label
-    ctx.globalAlpha = 0.88;
-    ctx.fillStyle = wc;
-    ctx.font = '500 9px "Plus Jakarta Sans", sans-serif';
-    ctx.textAlign = 'center';
-    const shortLabel = node.label.length > 18 ? node.label.slice(0, 16) + '…' : node.label;
-    ctx.fillText(shortLabel, node.x, node.y + s + 13);
-    ctx.globalAlpha = 1;
+    // Label — only draw on hover
+    if (hoveredNode && hoveredNode.id === node.id) {
+      ctx.globalAlpha = 0.95;
+      ctx.fillStyle = wc;
+      ctx.font = '600 10px "Plus Jakarta Sans", sans-serif';
+      ctx.textAlign = 'center';
+      const shortLabel = node.label.length > 22 ? node.label.slice(0, 20) + '…' : node.label;
+      ctx.fillText(shortLabel, node.x, node.y + s + 14);
+      ctx.globalAlpha = 1;
+    }
   }
 
   ctx.textAlign = 'left';
