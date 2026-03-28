@@ -80,7 +80,8 @@ def _run_auto_smart_process(course_name: str, module_name: str):
         msg = client.messages.create(
             model="claude-3-haiku-20240307",
             max_tokens=256,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            timeout=30.0,
         )
         raw = msg.content[0].text.strip()
         start, end = raw.find("["), raw.rfind("]") + 1

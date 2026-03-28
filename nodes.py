@@ -3,6 +3,7 @@ import json
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 
 import anthropic
@@ -72,18 +73,16 @@ def _get_tavily() -> TavilyClient:
     return _tavily
 
 
-_IMAGE_CACHE: dict[str, tuple[str, str]] = {}
 _MEDIA_MAP = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
               ".webp": "image/webp", ".gif": "image/gif"}
 
+@lru_cache(maxsize=50)
 def _encode_image(path: str) -> tuple[str, str]:
-    """Returns (base64_data, media_type). Cached per path."""
-    if path not in _IMAGE_CACHE:
-        p = Path(path)
-        media_type = _MEDIA_MAP.get(p.suffix.lower(), "image/png")
-        data = base64.standard_b64encode(p.read_bytes()).decode("utf-8")
-        _IMAGE_CACHE[path] = (data, media_type)
-    return _IMAGE_CACHE[path]
+    """Returns (base64_data, media_type). LRU-cached, max 50 entries (~100 MB cap)."""
+    p = Path(path)
+    media_type = _MEDIA_MAP.get(p.suffix.lower(), "image/png")
+    data = base64.standard_b64encode(p.read_bytes()).decode("utf-8")
+    return (data, media_type)
 
 
 def _strip_yaml_fence(md: str) -> str:
@@ -182,7 +181,8 @@ def _claude_text(prompt: str, max_tokens: int = 2000, images: list[str] | None =
             response = _get_claude().messages.create(
                 model=model,
                 max_tokens=max_tokens,
-                messages=[{"role": "user", "content": content}]
+                messages=[{"role": "user", "content": content}],
+                timeout=120.0,
             )
             return response.content[0].text
         except Exception as e:

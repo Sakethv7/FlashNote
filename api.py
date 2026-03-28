@@ -209,7 +209,8 @@ def _auto_group_images(image_paths: list[str], context_text: str = "") -> list[l
         msg = client.messages.create(
             model="claude-3-5-sonnet-latest",
             max_tokens=1024,
-            messages=[{"role": "user", "content": content}]
+            messages=[{"role": "user", "content": content}],
+            timeout=60.0,
         )
         raw = msg.content[0].text.strip()
         print(f"[auto-group] Claude response: {raw[:300]}")
@@ -290,7 +291,8 @@ async def suggest_placement(files: list[UploadFile] = File(default=[])):
         msg = client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=256,
-            messages=[{"role": "user", "content": content}]
+            messages=[{"role": "user", "content": content}],
+            timeout=30.0,
         )
         raw = msg.content[0].text.strip()
         start = raw.find("{")
@@ -653,6 +655,7 @@ def _claude_with_retry(client, max_retries: int = 5, **kwargs):
     """Call Claude with exponential backoff on 529 overloaded errors."""
     import time, random
     import anthropic as _ant
+    kwargs.setdefault("timeout", 120.0)
     for attempt in range(max_retries):
         try:
             return client.messages.create(**kwargs)
@@ -796,7 +799,8 @@ async def smart_order_notes(course_name: str = None, module_name: str = None):
         msg = client.messages.create(
             model="claude-3-haiku-20240307",
             max_tokens=256,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
+            timeout=30.0,
         )
         raw = msg.content[0].text.strip()
         start, end = raw.find("["), raw.rfind("]") + 1

@@ -659,11 +659,6 @@ async function smartProcessBulk(course, module, label, btn) {
   lastQueueData = null; fetchQueue();
 }
 
-// kept for internal use (auto-smart-order polling from watcher)
-async function consolidateBulk(course, module, label, btn) {
-  return smartProcessBulk(course, module, label, btn);
-}
-
 function showConsolidationIndicator(msg) {
   const el = document.getElementById('consolidation-indicator');
   const lbl = document.getElementById('consolidation-label');
@@ -702,39 +697,6 @@ async function pollConsolidation(jobKey, course, module, label) {
   }, 4000);
   // Store the interval so it can be cleared if consolidate is triggered again
   if (_activeConsolidations[jobKey]) _activeConsolidations[jobKey].interval = interval;
-}
-
-// ── Smart Merge ──
-
-async function smartMergeBulk(course, module, btn) {
-  const label = module || course;
-  const noteCount = lastQueueData ? lastQueueData.filter(n =>
-    (!course || n.course_name === course) &&
-    (module === undefined || module === null || n.module_name === module) &&
-    ['in_review','pending'].includes(n.status) && n.draft_markdown
-  ).length : '?';
-  if (!confirm(`Merge similar notes in "${label}" into fewer, denser notes?\n\n${noteCount} notes → roughly ${Math.max(1, Math.round(noteCount/3))} merged notes.\n\nOriginals will be replaced. This cannot be undone.`)) return;
-  const original = btn.textContent;
-  btn.textContent = '⏳'; btn.disabled = true;
-  const params = new URLSearchParams();
-  if (course) params.set('course_name', course);
-  if (module !== undefined && module !== null) params.set('module_name', module);
-  try {
-    const res = await fetch(`/api/queue/smart-merge?${params}`, { method: 'POST' });
-    const data = await res.json();
-    if (data.status === 'skipped') {
-      showToast(data.message, 'info');
-    } else if (data.status === 'merging') {
-      showToast(`🔀 Merging ${data.notes_in_pool} notes into ~${data.target_groups}… Refresh in a moment.`, 'success');
-      setTimeout(() => { lastQueueData = null; fetchQueue(); }, 4000);
-    } else {
-      showToast(`Merge failed: ${data.message || 'unknown error'}`, 'error');
-    }
-  } catch (err) {
-    showToast('Smart merge request failed', 'error');
-  } finally {
-    btn.textContent = original; btn.disabled = false;
-  }
 }
 
 // ── Smart Order ──
