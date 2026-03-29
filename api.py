@@ -511,7 +511,7 @@ async def list_queue():
             "module_name": n.get("module_name", ""),
             "tags": n.get("tags", []),
             "status": n.get("status", ""),
-            "timestamp": n.get("timestamp", ""),
+            "timestamp": n.get("timestamp") or _dt.now().isoformat(),
             "expansion_level": n.get("expansion_level", "detailed"),
             "loop_count": n.get("loop_count", 0),
             "sequence": n.get("sequence", None),
@@ -975,6 +975,7 @@ async def consolidate_notes_endpoint(course_name: str = None, module_name: str =
                         "draft_markdown": act["merged_markdown"],
                         "title": act.get("merged_title", "Merged Note"),
                         "status": "in_review",
+                        "timestamp": _dt.now().isoformat(),
                     })
                     for nid in act.get("delete", []):
                         queue_store.remove(nid)
