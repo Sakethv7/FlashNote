@@ -35,6 +35,9 @@ def _run_auto_smart_process(course_name: str, module_name: str):
     from nodes import consolidate_module_notes
     key = f"{course_name}::{module_name}"
     print(f"[auto-smart] starting for {key}")
+    # Clean up the timer entry now that we're executing
+    with _smart_order_lock:
+        _smart_order_timers.pop(key, None)
 
     # ── Step 1: Consolidate ──
     try:
@@ -46,10 +49,12 @@ def _run_auto_smart_process(course_name: str, module_name: str):
             actions = consolidate_module_notes(eligible)
             for act in actions:
                 if act["action"] == "merge":
+                    primary = queue_store.get(act["primary"]) or {}
                     queue_store.update(act["primary"], {
                         "draft_markdown": act["merged_markdown"],
                         "title": act.get("merged_title", "Merged Note"),
-                        "status": "in_review",
+                        "status": primary.get("status", "in_review"),
+                        "timestamp": __import__("datetime").datetime.now().isoformat(),
                     })
                     for nid in act.get("delete", []):
                         queue_store.remove(nid)
@@ -58,12 +63,14 @@ def _run_auto_smart_process(course_name: str, module_name: str):
                         queue_store.remove(nid)
             print(f"[auto-smart] {key} consolidate done — {len(actions)} actions")
     except Exception as e:
+        import traceback
         print(f"[auto-smart] {key} consolidate failed: {e}")
+        traceback.print_exc()
 
     # ── Step 2: Smart Order ──
     try:
         notes = queue_store.filter(course_name=course_name, module_name=module_name)
-        notes = [n for n in notes if n.get("draft_markdown", "").strip()]
+        notes = [n for n in notes if n.get("status") in ("in_review", "approved") and n.get("draft_markdown", "").strip()]
         if len(notes) < 2:
             return
         summaries = []

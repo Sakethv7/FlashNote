@@ -711,8 +711,12 @@ async function smartProcessBulk(course, module, label, btn) {
   const rowEl = btn.closest('.ft-module-row, .ft-course-row');
   const parentEl = rowEl ? rowEl.parentElement : null;
 
-  // Remove any existing progress panel for this row
-  parentEl?.querySelector('.ft-smart-progress')?.remove();
+  // Remove any existing progress panel for this exact row (keyed by row reference)
+  rowEl?.nextElementSibling?.classList.contains('ft-smart-progress') &&
+    rowEl.nextElementSibling.remove();
+
+  // Use a unique per-invocation ID so concurrent processes and spaces in labels never collide
+  const pid = `sp-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 
   // Build inline progress panel
   const panel = document.createElement('div');
@@ -720,40 +724,39 @@ async function smartProcessBulk(course, module, label, btn) {
   panel.innerHTML = `
     <div class="ft-smart-progress-header">
       <span>✦ Smart processing "${escapeHtml(label)}"</span>
-      <span id="sp-eta-${escapeHtml(label)}" style="font-size:10px;font-weight:400;color:var(--muted);"></span>
+      <span id="${pid}-eta" style="font-size:10px;font-weight:400;color:var(--muted);"></span>
     </div>
     <div class="ft-smart-progress-steps">
       <div class="ft-smart-step">
-        <div class="ft-smart-step-label" id="sp-step1-lbl-${escapeHtml(label)}">
+        <div class="ft-smart-step-label" id="${pid}-lbl1">
           <span>1 · Merge duplicates</span>
         </div>
-        <div class="ft-smart-step-bar"><div class="ft-smart-step-fill" id="sp-step1-fill-${escapeHtml(label)}"></div></div>
+        <div class="ft-smart-step-bar"><div class="ft-smart-step-fill" id="${pid}-fill1"></div></div>
       </div>
       <div class="ft-smart-step">
-        <div class="ft-smart-step-label" id="sp-step2-lbl-${escapeHtml(label)}">
+        <div class="ft-smart-step-label" id="${pid}-lbl2">
           <span>2 · Sequence notes</span>
         </div>
-        <div class="ft-smart-step-bar"><div class="ft-smart-step-fill" id="sp-step2-fill-${escapeHtml(label)}"></div></div>
+        <div class="ft-smart-step-bar"><div class="ft-smart-step-fill" id="${pid}-fill2"></div></div>
       </div>
     </div>
-    <div class="ft-smart-progress-detail" id="sp-detail-${escapeHtml(label)}">Starting…</div>
+    <div class="ft-smart-progress-detail" id="${pid}-detail">Starting…</div>
   `;
   if (parentEl && rowEl) {
     rowEl.insertAdjacentElement('afterend', panel);
   }
 
-  // Helper: update panel state
-  const safeLabel = escapeHtml(label);
+  // Helper: update panel state via unique pid (no label-in-ID issues)
   const setStep = (step, state, detail) => {
-    const lbl = document.getElementById(`sp-step${step}-lbl-${safeLabel}`);
-    const fill = document.getElementById(`sp-step${step}-fill-${safeLabel}`);
-    const det = document.getElementById(`sp-detail-${safeLabel}`);
-    if (lbl) { lbl.className = `ft-smart-step-label ${state}`; }
+    const lbl  = document.getElementById(`${pid}-lbl${step}`);
+    const fill = document.getElementById(`${pid}-fill${step}`);
+    const det  = document.getElementById(`${pid}-detail`);
+    if (lbl)  { lbl.className = `ft-smart-step-label ${state}`; }
     if (fill) { fill.className = `ft-smart-step-fill ${state}`; if (state === 'active') fill.style.width = '60%'; }
     if (detail && det) det.textContent = detail;
   };
   const setEta = (txt) => {
-    const el = document.getElementById(`sp-eta-${safeLabel}`);
+    const el = document.getElementById(`${pid}-eta`);
     if (el) el.textContent = txt;
   };
 
