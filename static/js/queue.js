@@ -703,52 +703,126 @@ function regenBulk(course, module, label, btn) {
 // ── Smart Process — consolidate then order in one shot ──
 
 async function smartProcessBulk(course, module, label, btn) {
-  if (!confirm(`✦ Smart clean "${label}"?\n\nStep 1: merge duplicate/overlapping notes\nStep 2: sequence remaining notes in logical order\n\nThis may take 30–90 seconds.`)) return;
-  const original = btn.textContent;
-  btn.disabled = true;
   const params = new URLSearchParams();
   if (course) params.set('course_name', course);
   if (module !== undefined && module !== null) params.set('module_name', module);
 
+  // Find the parent container (module or course element) to inject progress panel
+  const rowEl = btn.closest('.ft-module-row, .ft-course-row');
+  const parentEl = rowEl ? rowEl.parentElement : null;
+
+  // Remove any existing progress panel for this row
+  parentEl?.querySelector('.ft-smart-progress')?.remove();
+
+  // Build inline progress panel
+  const panel = document.createElement('div');
+  panel.className = 'ft-smart-progress';
+  panel.innerHTML = `
+    <div class="ft-smart-progress-header">
+      <span>✦ Smart processing "${escapeHtml(label)}"</span>
+      <span id="sp-eta-${escapeHtml(label)}" style="font-size:10px;font-weight:400;color:var(--muted);"></span>
+    </div>
+    <div class="ft-smart-progress-steps">
+      <div class="ft-smart-step">
+        <div class="ft-smart-step-label" id="sp-step1-lbl-${escapeHtml(label)}">
+          <span>1 · Merge duplicates</span>
+        </div>
+        <div class="ft-smart-step-bar"><div class="ft-smart-step-fill" id="sp-step1-fill-${escapeHtml(label)}"></div></div>
+      </div>
+      <div class="ft-smart-step">
+        <div class="ft-smart-step-label" id="sp-step2-lbl-${escapeHtml(label)}">
+          <span>2 · Sequence notes</span>
+        </div>
+        <div class="ft-smart-step-bar"><div class="ft-smart-step-fill" id="sp-step2-fill-${escapeHtml(label)}"></div></div>
+      </div>
+    </div>
+    <div class="ft-smart-progress-detail" id="sp-detail-${escapeHtml(label)}">Starting…</div>
+  `;
+  if (parentEl && rowEl) {
+    rowEl.insertAdjacentElement('afterend', panel);
+  }
+
+  // Helper: update panel state
+  const safeLabel = escapeHtml(label);
+  const setStep = (step, state, detail) => {
+    const lbl = document.getElementById(`sp-step${step}-lbl-${safeLabel}`);
+    const fill = document.getElementById(`sp-step${step}-fill-${safeLabel}`);
+    const det = document.getElementById(`sp-detail-${safeLabel}`);
+    if (lbl) { lbl.className = `ft-smart-step-label ${state}`; }
+    if (fill) { fill.className = `ft-smart-step-fill ${state}`; if (state === 'active') fill.style.width = '60%'; }
+    if (detail && det) det.textContent = detail;
+  };
+  const setEta = (txt) => {
+    const el = document.getElementById(`sp-eta-${safeLabel}`);
+    if (el) el.textContent = txt;
+  };
+
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '…';
+  const startTime = Date.now();
+
   // ── Step 1: Consolidate ──
-  btn.textContent = '1/2 Merging…';
-  showConsolidationIndicator(`"${label}": merging duplicates…`);
+  setStep(1, 'active', 'Analysing notes for overlap…');
+  setEta('~30–90s');
+  let mergeResult = { merged: 0, deleted: 0 };
   try {
     const res = await fetch(`/api/queue/consolidate?${params}`, { method: 'POST' });
     const data = await res.json();
-    if (data.status !== 'skipped') {
-      // Poll until consolidate finishes
-      await new Promise((resolve) => {
+    if (data.status === 'skipped') {
+      setStep(1, 'done', `Skipped — ${data.reason || 'nothing to merge'}`);
+      mergeResult = null;
+    } else {
+      // Poll until done
+      mergeResult = await new Promise((resolve) => {
+        let pollCount = 0;
         const interval = setInterval(async () => {
           try {
+            pollCount++;
             const sr = await fetch(`/api/queue/consolidate/status?${params}`);
             const sd = await sr.json();
-            showConsolidationIndicator(`"${label}": ${sd.message || 'merging…'}`);
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+            setStep(1, 'active', sd.message || 'Merging…');
+            setEta(`${elapsed}s elapsed`);
             if (sd.status === 'done' || sd.status === 'error') {
               clearInterval(interval);
+              setStep(1, 'done', sd.message || 'Done');
               resolve(sd);
             }
           } catch { clearInterval(interval); resolve({}); }
-        }, 4000);
+        }, 3000);
       });
     }
-  } catch { /* consolidate failed, still try to order */ }
+  } catch (e) {
+    setStep(1, 'done', `Skipped (${e.message})`);
+  }
 
   // ── Step 2: Smart Order ──
-  btn.textContent = '2/2 Ordering…';
-  showConsolidationIndicator(`"${label}": sequencing…`);
+  setStep(2, 'active', 'Sequencing notes in logical order…');
+  let orderResult = null;
   try {
     const res = await fetch(`/api/queue/smart-order?${params}`, { method: 'POST' });
-    const data = await res.json();
-    if (data.status === 'done') {
-      showToast(`✦ "${label}" cleaned & ordered`, 'success');
+    orderResult = await res.json();
+    const elapsed = Math.round((Date.now() - startTime) / 1000);
+    if (orderResult.status === 'done') {
+      setStep(2, 'done', `Ordered ${orderResult.order?.length || 0} notes`);
+      setEta(`Done in ${elapsed}s`);
     } else {
-      showToast(`✦ "${label}" merged (ordering skipped: ${data.reason || data.message || ''})`, 'success');
+      setStep(2, 'done', `Skipped — ${orderResult.reason || orderResult.message || ''}`);
+      setEta(`Done in ${elapsed}s`);
     }
-  } catch { showToast('Smart order step failed', 'error'); }
+  } catch {
+    setStep(2, 'done', 'Ordering failed');
+  }
 
-  hideConsolidationIndicator();
+  // Summary toast
+  const mergeStr = mergeResult && mergeResult.merged > 0 ? `${mergeResult.merged} merged` : 'no merges';
+  const orderStr = orderResult?.status === 'done' ? `${orderResult.order?.length || 0} notes ordered` : 'order skipped';
+  showToast(`✦ "${label}": ${mergeStr}, ${orderStr}`, 'success');
+
   btn.textContent = original; btn.disabled = false;
+  // Remove progress panel after a short delay so user can read result
+  setTimeout(() => panel.remove(), 4000);
   lastQueueData = null; fetchQueue();
 }
 
