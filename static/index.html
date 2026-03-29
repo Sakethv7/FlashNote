@@ -62,13 +62,20 @@
         <span style="font-size:11px;color:var(--muted);">images · PDF · txt · rtf</span>
       </div>
       <div class="form-group">
-        <label style="font-size:13px;font-weight:500;color:var(--text);">Course <span style="color:var(--danger);">*</span></label>
-        <input class="form-input" type="text" id="desktop-course-input" placeholder="e.g. Agentic AI, System Design…" autocomplete="off" list="desktop-course-suggestions" oninput="checkDesktopReady()" />
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
+          <label style="font-size:13px;font-weight:500;color:var(--text);margin:0;">Course</label>
+          <button type="button" id="desktop-redetect-btn" onclick="autoDetectDesktopPlacement(true)" style="font-size:11px;font-weight:600;color:var(--accent);background:var(--accent-subtle);border:1px solid var(--accent-border);border-radius:6px;padding:3px 10px;cursor:pointer;display:none;" title="Re-run AI detection">✦ Re-detect</button>
+        </div>
+        <div class="ai-detect-status" id="desktop-ai-status">
+          <span class="ai-detect-spin">↻</span> AI is detecting course &amp; module…
+        </div>
+        <input class="form-input" type="text" id="desktop-course-input" placeholder="e.g. Agentic AI, System Design…" autocomplete="off" list="desktop-course-suggestions" oninput="onDesktopCourseInput()" />
         <datalist id="desktop-course-suggestions"></datalist>
       </div>
       <div class="form-group">
         <label style="font-size:13px;font-weight:500;color:var(--text);">Module <span style="font-weight:400;color:var(--muted);">(optional)</span></label>
-        <input class="form-input" type="text" id="desktop-module-input" placeholder="e.g. Module 1, Week 2…" autocomplete="off" />
+        <input class="form-input" type="text" id="desktop-module-input" placeholder="AI will suggest, or type your own…" autocomplete="off" list="desktop-module-suggestions" oninput="this.classList.remove('ai-filled')" />
+        <datalist id="desktop-module-suggestions"></datalist>
       </div>
       <div class="form-group">
         <label style="font-size:13px;font-weight:500;color:var(--text);">Your understanding <span style="font-weight:400;color:var(--muted);">(optional)</span></label>

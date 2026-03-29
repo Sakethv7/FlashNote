@@ -79,6 +79,8 @@ function closeUploadModal() {
   document.getElementById('upload-modal').style.display = 'none';
   desktopQueue.forEach(i => { if (!i.isDoc && i.objectUrl) URL.revokeObjectURL(i.objectUrl); });
   desktopQueue = [];
+  _desktopDetecting = false;
+  clearTimeout(_desktopDetectTimer);
   desktopGroupSize = 1;
   desktopGroupMode = 'fixed';
   desktopExpansionLevel = 'detailed';
@@ -87,15 +89,24 @@ function closeUploadModal() {
   const hint = document.getElementById('desktop-group-hint');
   if (hint) hint.textContent = desktopGroupHints[1];
   document.getElementById('desktop-file-input').value = '';
-  document.getElementById('desktop-course-input').value = '';
-  document.getElementById('desktop-module-input').value = '';
+  const courseIn = document.getElementById('desktop-course-input');
+  courseIn.value = ''; courseIn.classList.remove('ai-filled'); courseIn.style.borderColor = '';
+  const moduleIn = document.getElementById('desktop-module-input');
+  moduleIn.value = ''; moduleIn.classList.remove('ai-filled');
   const un = document.getElementById('desktop-user-notes');
   if (un) un.value = '';
+  const statusEl = document.getElementById('desktop-ai-status');
+  if (statusEl) statusEl.classList.remove('show');
+  const redetectBtn = document.getElementById('desktop-redetect-btn');
+  if (redetectBtn) { redetectBtn.style.display = 'none'; redetectBtn.textContent = '✦ Re-detect'; }
   document.getElementById('desktop-progress').style.display = 'none';
   document.getElementById('desktop-progress-fill').style.width = '0%';
   document.getElementById('desktop-upload-btn').disabled = true;
   renderDesktopThumbs();
 }
+
+let _desktopDetecting = false;
+let _desktopDetectTimer = null;
 
 function addDesktopFiles(fileList) {
   const remaining = DESKTOP_MAX - desktopQueue.length;
@@ -104,6 +115,74 @@ function addDesktopFiles(fileList) {
     desktopQueue.push({ file: f, isDoc: doc, objectUrl: doc ? null : URL.createObjectURL(f) });
   });
   renderDesktopThumbs();
+  checkDesktopReady();
+  // Auto-detect course+module from images (debounced 600ms)
+  if (desktopQueue.some(i => !i.isDoc)) {
+    clearTimeout(_desktopDetectTimer);
+    _desktopDetectTimer = setTimeout(() => autoDetectDesktopPlacement(false), 600);
+  }
+}
+
+async function autoDetectDesktopPlacement(manual = false) {
+  if (_desktopDetecting) return;
+  const images = desktopQueue.filter(i => !i.isDoc);
+  if (!images.length) return;
+  _desktopDetecting = true;
+
+  const statusEl = document.getElementById('desktop-ai-status');
+  const redetectBtn = document.getElementById('desktop-redetect-btn');
+  const courseIn = document.getElementById('desktop-course-input');
+  const moduleIn = document.getElementById('desktop-module-input');
+
+  statusEl.classList.add('show');
+  if (manual) { redetectBtn.textContent = '…'; redetectBtn.disabled = true; }
+  checkDesktopReady();
+
+  try {
+    const form = new FormData();
+    images.slice(0, 3).forEach(i => form.append('files', i.file));
+    const res = await fetch('/api/suggest-placement', { method: 'POST', body: form });
+    const data = await res.json();
+    if (data.course) {
+      if (!courseIn.value.trim()) {
+        courseIn.value = data.course;
+        courseIn.classList.add('ai-filled');
+        // Populate module suggestions for this course
+        loadDesktopModuleSuggestions(data.course);
+      }
+      if (data.module && !moduleIn.value.trim()) {
+        moduleIn.value = data.module;
+        moduleIn.classList.add('ai-filled');
+      }
+    }
+    if (manual) {
+      redetectBtn.textContent = data.course ? '✓ Done' : '✦ Re-detect';
+      setTimeout(() => { redetectBtn.textContent = '✦ Re-detect'; }, 2000);
+    }
+  } catch {
+    if (manual) redetectBtn.textContent = '✦ Re-detect';
+  } finally {
+    _desktopDetecting = false;
+    statusEl.classList.remove('show');
+    if (manual) redetectBtn.disabled = false;
+    checkDesktopReady();
+  }
+}
+
+function loadDesktopModuleSuggestions(courseName) {
+  fetch('/api/library').then(r => r.json()).then(notes => {
+    const modules = [...new Set(
+      notes.filter(n => n.course_name === courseName && n.module_name).map(n => n.module_name)
+    )].sort();
+    const dl = document.getElementById('desktop-module-suggestions');
+    if (dl) dl.innerHTML = modules.map(m => `<option value="${escapeHtml(m)}"></option>`).join('');
+  }).catch(() => {});
+}
+
+function onDesktopCourseInput() {
+  document.getElementById('desktop-course-input').classList.remove('ai-filled');
+  const course = document.getElementById('desktop-course-input').value.trim();
+  if (course) loadDesktopModuleSuggestions(course);
   checkDesktopReady();
 }
 
@@ -188,8 +267,10 @@ function renderDesktopThumbs() {
 }
 
 function checkDesktopReady() {
-  const course = document.getElementById('desktop-course-input').value.trim();
-  document.getElementById('desktop-upload-btn').disabled = !(desktopQueue.length > 0 && course);
+  const hasImages = desktopQueue.some(i => !i.isDoc);
+  document.getElementById('desktop-upload-btn').disabled = !(desktopQueue.length > 0 && !_desktopDetecting);
+  const redetectBtn = document.getElementById('desktop-redetect-btn');
+  if (redetectBtn) redetectBtn.style.display = hasImages ? '' : 'none';
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -213,10 +294,22 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function doDesktopUpload() {
+  // If course still empty, try one last inline detection
+  if (!document.getElementById('desktop-course-input').value.trim() && desktopQueue.some(i => !i.isDoc)) {
+    await autoDetectDesktopPlacement(false);
+  }
   const course = document.getElementById('desktop-course-input').value.trim();
   const module = document.getElementById('desktop-module-input').value.trim();
   const userNotes = (document.getElementById('desktop-user-notes')?.value || '').trim();
-  if (!desktopQueue.length || !course) return;
+  if (!desktopQueue.length) return;
+  if (!course) {
+    // Flash the course field red and focus
+    const el = document.getElementById('desktop-course-input');
+    el.style.borderColor = 'var(--danger)';
+    el.focus();
+    setTimeout(() => { el.style.borderColor = ''; }, 2000);
+    return;
+  }
 
   const btn = document.getElementById('desktop-upload-btn');
   const progressWrap = document.getElementById('desktop-progress');
