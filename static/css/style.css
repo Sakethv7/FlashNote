@@ -1573,6 +1573,27 @@ a:hover {
   box-shadow: 0 0 0 3px var(--accent-subtle);
 }
 
+.form-input.ai-filled {
+  border-color: var(--accent);
+  background-color: var(--accent-subtle);
+}
+
+.ai-detect-status {
+  display: none;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+.ai-detect-status.show { display: flex; }
+.ai-detect-spin {
+  display: inline-block;
+  animation: aiSpin 0.8s linear infinite;
+}
+@keyframes aiSpin { to { transform: rotate(360deg); } }
+
 .form-select {
   background-color: var(--bg);
   color: var(--text);
