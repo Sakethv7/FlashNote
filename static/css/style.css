@@ -609,7 +609,7 @@ a:hover {
 }
 .ft-note-row:hover .ft-note-open { opacity: 1; }
 
-.ft-approve, .ft-regen, .ft-trash, .ft-consolidate, .ft-move, .ft-reorder-up, .ft-reorder-down, .ft-smartorder, .ft-smartmerge {
+.ft-approve, .ft-regen, .ft-trash, .ft-smart, .ft-move, .ft-reorder-up, .ft-reorder-down {
   background: none;
   border: none;
   font-size: 13px;
@@ -626,12 +626,8 @@ a:hover {
 .ft-regen { color: var(--accent); }
 .ft-regen:hover { background: var(--accent-subtle); }
 .ft-trash:hover { background: rgba(220,50,50,0.1); }
-.ft-consolidate { color: #7c5cbf; font-size: 12px; }
-.ft-consolidate:hover { background: rgba(124,92,191,0.12); }
-.ft-smartorder { color: #2a7a8a; font-size: 12px; }
-.ft-smartorder:hover { background: rgba(42,122,138,0.12); }
-.ft-smartmerge { color: #8a5a2a; font-size: 14px; font-weight: 700; }
-.ft-smartmerge:hover { background: rgba(138,90,42,0.12); }
+.ft-smart { color: #7c5cbf; font-size: 13px; font-weight: 600; }
+.ft-smart:hover { background: rgba(124,92,191,0.12); }
 .ft-move { font-size: 12px; }
 .ft-move:hover { background: rgba(100,150,255,0.1); }
 .ft-reorder-up, .ft-reorder-down { font-size: 11px; color: var(--muted); padding: 2px 3px; }
@@ -741,31 +737,23 @@ a:hover {
   outline: none;
 }
 .move-input:focus { border-color: var(--accent); }
-.ft-row-approve, .ft-row-regen, .ft-row-trash, .ft-row-consolidate, .ft-row-smartorder { font-size: 12px; }
+.ft-row-approve, .ft-row-regen, .ft-row-trash, .ft-row-smart { font-size: 12px; }
 .ft-course-row:hover .ft-row-approve,
 .ft-course-row:hover .ft-row-regen,
 .ft-course-row:hover .ft-row-trash,
-.ft-course-row:hover .ft-row-consolidate,
-.ft-course-row:hover .ft-row-smartorder,
-.ft-course-row:hover .ft-row-smartmerge,
+.ft-course-row:hover .ft-row-smart,
 .ft-module-row:hover .ft-row-approve,
 .ft-module-row:hover .ft-row-regen,
 .ft-module-row:hover .ft-row-trash,
-.ft-module-row:hover .ft-row-consolidate,
-.ft-module-row:hover .ft-row-smartorder,
-.ft-module-row:hover .ft-row-smartmerge { opacity: 0.6; }
+.ft-module-row:hover .ft-row-smart { opacity: 0.6; }
 .ft-course-row .ft-row-approve:hover,
 .ft-course-row .ft-row-regen:hover,
 .ft-course-row .ft-row-trash:hover,
-.ft-course-row .ft-row-consolidate:hover,
-.ft-course-row .ft-row-smartorder:hover,
-.ft-course-row .ft-row-smartmerge:hover,
+.ft-course-row .ft-row-smart:hover,
 .ft-module-row .ft-row-approve:hover,
 .ft-module-row .ft-row-regen:hover,
 .ft-module-row .ft-row-trash:hover,
-.ft-module-row .ft-row-consolidate:hover,
-.ft-module-row .ft-row-smartorder:hover,
-.ft-module-row .ft-row-smartmerge:hover { opacity: 1 !important; }
+.ft-module-row .ft-row-smart:hover { opacity: 1 !important; }
 /* Editable names show a subtle text-cursor hint on hover */
 .ft-editable-name { cursor: text; }
 .ft-editable-name:hover { text-decoration: underline dotted var(--muted); }

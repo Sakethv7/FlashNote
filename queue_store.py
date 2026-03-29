@@ -1,4 +1,5 @@
 import json
+import shutil
 import threading
 from pathlib import Path
 from typing import Optional
@@ -22,7 +23,12 @@ class QueueStore:
                 self._store = {}
 
     def _save(self):
-        STORE_PATH.write_text(json.dumps(self._store, indent=2, default=str))
+        """Atomic write: write to .tmp, backup existing to .bak, then rename."""
+        tmp = STORE_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self._store, indent=2, default=str))
+        if STORE_PATH.exists():
+            shutil.copy2(STORE_PATH, STORE_PATH.with_suffix(".bak"))
+        tmp.replace(STORE_PATH)
 
     def add(self, note: dict):
         with self._lock:

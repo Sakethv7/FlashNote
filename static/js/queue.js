@@ -607,31 +607,56 @@ function regenBulk(course, module, label, btn) {
     btn, course, module });
 }
 
-async function consolidateBulk(course, module, label, btn) {
-  if (!confirm(`Consolidate notes in "${label}"?\n\nClaude will analyse all notes for overlap and merge duplicates into richer combined notes. This may take 30–90 seconds.`)) return;
+// ── Smart Process — consolidate then order in one shot ──
+
+async function smartProcessBulk(course, module, label, btn) {
+  if (!confirm(`✦ Smart clean "${label}"?\n\nStep 1: merge duplicate/overlapping notes\nStep 2: sequence remaining notes in logical order\n\nThis may take 30–90 seconds.`)) return;
   const original = btn.textContent;
-  btn.textContent = '…'; btn.disabled = true;
+  btn.disabled = true;
   const params = new URLSearchParams();
   if (course) params.set('course_name', course);
   if (module !== undefined && module !== null) params.set('module_name', module);
+
+  // ── Step 1: Consolidate ──
+  btn.textContent = '1/2 Merging…';
+  showConsolidationIndicator(`"${label}": merging duplicates…`);
   try {
     const res = await fetch(`/api/queue/consolidate?${params}`, { method: 'POST' });
     const data = await res.json();
-    if (data.status === 'skipped') {
-      showToast(data.reason, 'info');
-    } else {
-      const jobKey = data.job_key;
-      // Clear any existing poll interval for this job before starting a new one
-      if (_activeConsolidations[jobKey]?.interval) clearInterval(_activeConsolidations[jobKey].interval);
-      _activeConsolidations[jobKey] = { course, module, label };
-      showConsolidationIndicator(`Consolidating "${label}" (${data.count} notes)…`);
-      pollConsolidation(jobKey, course, module, label);
+    if (data.status !== 'skipped') {
+      // Poll until consolidate finishes
+      await new Promise((resolve) => {
+        const interval = setInterval(async () => {
+          try {
+            const sr = await fetch(`/api/queue/consolidate/status?${params}`);
+            const sd = await sr.json();
+            showConsolidationIndicator(`"${label}": ${sd.message || 'merging…'}`);
+            if (sd.status === 'done' || sd.status === 'error') {
+              clearInterval(interval);
+              resolve(sd);
+            }
+          } catch { clearInterval(interval); resolve({}); }
+        }, 4000);
+      });
     }
-  } catch (err) {
-    showToast('Consolidation request failed', 'error');
-  } finally {
-    btn.textContent = original; btn.disabled = false;
-  }
+  } catch { /* consolidate failed, still try to order */ }
+
+  // ── Step 2: Smart Order ──
+  btn.textContent = '2/2 Ordering…';
+  showConsolidationIndicator(`"${label}": sequencing…`);
+  try {
+    const res = await fetch(`/api/queue/smart-order?${params}`, { method: 'POST' });
+    const data = await res.json();
+    if (data.status === 'done') {
+      showToast(`✦ "${label}" cleaned & ordered`, 'success');
+    } else {
+      showToast(`✦ "${label}" merged (ordering skipped: ${data.reason || data.message || ''})`, 'success');
+    }
+  } catch { showToast('Smart order step failed', 'error'); }
+
+  hideConsolidationIndicator();
+  btn.textContent = original; btn.disabled = false;
+  lastQueueData = null; fetchQueue();
 }
 
 function showConsolidationIndicator(msg) {
@@ -672,39 +697,6 @@ async function pollConsolidation(jobKey, course, module, label) {
   }, 4000);
   // Store the interval so it can be cleared if consolidate is triggered again
   if (_activeConsolidations[jobKey]) _activeConsolidations[jobKey].interval = interval;
-}
-
-// ── Smart Merge ──
-
-async function smartMergeBulk(course, module, btn) {
-  const label = module || course;
-  const noteCount = lastQueueData ? lastQueueData.filter(n =>
-    (!course || n.course_name === course) &&
-    (module === undefined || module === null || n.module_name === module) &&
-    ['in_review','pending'].includes(n.status) && n.draft_markdown
-  ).length : '?';
-  if (!confirm(`Merge similar notes in "${label}" into fewer, denser notes?\n\n${noteCount} notes → roughly ${Math.max(1, Math.round(noteCount/3))} merged notes.\n\nOriginals will be replaced. This cannot be undone.`)) return;
-  const original = btn.textContent;
-  btn.textContent = '⏳'; btn.disabled = true;
-  const params = new URLSearchParams();
-  if (course) params.set('course_name', course);
-  if (module !== undefined && module !== null) params.set('module_name', module);
-  try {
-    const res = await fetch(`/api/queue/smart-merge?${params}`, { method: 'POST' });
-    const data = await res.json();
-    if (data.status === 'skipped') {
-      showToast(data.message, 'info');
-    } else if (data.status === 'merging') {
-      showToast(`🔀 Merging ${data.notes_in_pool} notes into ~${data.target_groups}… Refresh in a moment.`, 'success');
-      setTimeout(() => { lastQueueData = null; fetchQueue(); }, 4000);
-    } else {
-      showToast(`Merge failed: ${data.message || 'unknown error'}`, 'error');
-    }
-  } catch (err) {
-    showToast('Smart merge request failed', 'error');
-  } finally {
-    btn.textContent = original; btn.disabled = false;
-  }
 }
 
 // ── Smart Order ──
@@ -1001,14 +993,12 @@ async function fetchQueue() {
         <span class="ft-icon">📚</span>
         <span class="ft-name ft-editable-name" title="Double-click to rename">${escapeHtml(course)}</span>
         <span class="ft-badge">${totalNotes}</span>
-        <button class="ft-consolidate ft-row-consolidate" title="Consolidate duplicates in this course (AI)">🔀</button>
-        <button class="ft-smartorder ft-row-smartorder" title="Smart order notes in this course (AI)">🗂</button>
+        <button class="ft-smart ft-row-smart" title="Merge duplicates then sequence notes in logical order">✦</button>
         <button class="ft-approve ft-row-approve" title="Approve all in this course">✓</button>
         <button class="ft-regen ft-row-regen" title="Regenerate all in this course">↻</button>
         <button class="ft-trash ft-row-trash" title="Delete all in this course">🗑</button>
       `;
-      courseRow.querySelector('.ft-consolidate').addEventListener('click', e => { e.stopPropagation(); consolidateBulk(course, undefined, course, e.currentTarget); });
-      courseRow.querySelector('.ft-smartorder').addEventListener('click', e => { e.stopPropagation(); smartOrderBulk(course, undefined, e.currentTarget); });
+      courseRow.querySelector('.ft-smart').addEventListener('click', e => { e.stopPropagation(); smartProcessBulk(course, undefined, course, e.currentTarget); });
       courseRow.querySelector('.ft-approve').addEventListener('click', e => { e.stopPropagation(); approveBulk(course, undefined, course, e.currentTarget); });
       courseRow.querySelector('.ft-regen').addEventListener('click', e => { e.stopPropagation(); regenBulk(course, undefined, course, e.currentTarget); });
       courseRow.querySelector('.ft-trash').addEventListener('click', e => { e.stopPropagation(); deleteBulk(course, undefined, course, e.currentTarget); });
@@ -1042,14 +1032,12 @@ async function fetchQueue() {
             <span class="ft-icon">📂</span>
             <span class="ft-name ft-editable-name" title="Double-click to rename">${escapeHtml(mod)}</span>
             <span class="ft-badge">${modNotes.length}</span>
-            <button class="ft-consolidate ft-row-consolidate" title="Consolidate duplicates in this module (AI)">🔀</button>
-            <button class="ft-smartorder ft-row-smartorder" title="Smart order notes in this module (AI)">🗂</button>
+            <button class="ft-smart ft-row-smart" title="Merge duplicates then sequence notes in logical order">✦</button>
             <button class="ft-approve ft-row-approve" title="Approve all in this module">✓</button>
             <button class="ft-regen ft-row-regen" title="Regenerate all in this module">↻</button>
             <button class="ft-trash ft-row-trash" title="Delete all in this module">🗑</button>
           `;
-          modRow.querySelector('.ft-consolidate').addEventListener('click', e => { e.stopPropagation(); consolidateBulk(course, mod, mod, e.currentTarget); });
-          modRow.querySelector('.ft-smartorder').addEventListener('click', e => { e.stopPropagation(); smartOrderBulk(course, mod, e.currentTarget); });
+          modRow.querySelector('.ft-smart').addEventListener('click', e => { e.stopPropagation(); smartProcessBulk(course, mod, mod, e.currentTarget); });
           modRow.querySelector('.ft-approve').addEventListener('click', e => { e.stopPropagation(); approveBulk(course, mod, mod, e.currentTarget); });
           modRow.querySelector('.ft-regen').addEventListener('click', e => { e.stopPropagation(); regenBulk(course, mod, mod, e.currentTarget); });
           modRow.querySelector('.ft-trash').addEventListener('click', e => { e.stopPropagation(); deleteBulk(course, mod, mod, e.currentTarget); });
