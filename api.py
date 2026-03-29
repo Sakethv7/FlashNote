@@ -511,7 +511,7 @@ async def list_queue():
             "module_name": n.get("module_name", ""),
             "tags": n.get("tags", []),
             "status": n.get("status", ""),
-            "timestamp": n.get("timestamp") or _dt.now().isoformat(),
+            "timestamp": n.get("timestamp") or datetime.now().isoformat(),
             "expansion_level": n.get("expansion_level", "detailed"),
             "loop_count": n.get("loop_count", 0),
             "sequence": n.get("sequence", None),
@@ -778,7 +778,7 @@ async def smart_order_notes(course_name: str = None, module_name: str = None):
     """Use Claude to suggest a logical reading order for notes in a module/course."""
     import anthropic as _ant, json as _j
     notes = queue_store.filter(course_name=course_name, module_name=module_name)
-    notes = [n for n in notes if n.get("draft_markdown", "").strip()]
+    notes = [n for n in notes if n.get("status") in ("in_review", "approved") and n.get("draft_markdown", "").strip()]
     if len(notes) < 2:
         return {"status": "skipped", "reason": "Need at least 2 notes with content."}
 
@@ -832,6 +832,8 @@ async def consolidate_status_early(course_name: str = None, module_name: str = N
     """Lightweight poll endpoint — returns whether a consolidation is running for this scope."""
     key = f"{course_name or ''}::{module_name or ''}"
     job = _consolidation_jobs.get(key)
+    if job and job.get("status") in ("done", "error"):
+        _consolidation_jobs.pop(key, None)
     return job if job else {"status": "idle"}
 
 
@@ -971,11 +973,12 @@ async def consolidate_notes_endpoint(course_name: str = None, module_name: str =
             _consolidation_jobs[job_key]["message"] = "Applying changes…"
             for act in actions:
                 if act["action"] == "merge":
+                    primary = queue_store.get(act["primary"]) or {}
                     queue_store.update(act["primary"], {
                         "draft_markdown": act["merged_markdown"],
                         "title": act.get("merged_title", "Merged Note"),
-                        "status": "in_review",
-                        "timestamp": _dt.now().isoformat(),
+                        "status": primary.get("status", "in_review"),
+                        "timestamp": datetime.now().isoformat(),
                     })
                     for nid in act.get("delete", []):
                         queue_store.remove(nid)
