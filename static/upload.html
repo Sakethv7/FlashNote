@@ -213,11 +213,26 @@
       font-size: 14px;
       font-family: inherit;
       outline: none;
+      transition: border-color 0.15s;
     }
     .field input:focus, .field textarea:focus { border-color: var(--accent); }
+    .field input.ai-filled { border-color: var(--accent); background: var(--accent-subtle); }
     .field textarea { resize: vertical; min-height: 80px; line-height: 1.5; }
     .field input::placeholder, .field textarea::placeholder { color: var(--muted); }
     .field .hint { font-size: 11px; color: var(--muted); }
+
+    /* AI detect status */
+    .ai-status {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--accent);
+      display: none;
+      align-items: center;
+      gap: 5px;
+    }
+    .ai-status.show { display: flex; }
+    .ai-spin { display: inline-block; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
     /* Upload button */
     .upload-btn {
@@ -354,9 +369,12 @@
 
       <!-- Fields -->
       <div class="field">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
-          <label style="margin:0;">Course <span style="color:var(--danger);">*</span></label>
-          <button type="button" id="auto-detect-btn" onclick="autoDetectPlacement()" style="font-size:11px;font-weight:600;color:var(--accent);background:var(--accent-subtle);border:1px solid var(--accent);border-radius:6px;padding:3px 10px;cursor:pointer;display:none;" title="Let AI look at your images and suggest the right course & module">✦ Auto-detect</button>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
+          <label style="margin:0;">Course</label>
+          <button type="button" id="auto-detect-btn" onclick="autoDetectPlacement(true)" style="font-size:11px;font-weight:600;color:var(--accent);background:var(--accent-subtle);border:1px solid var(--accent);border-radius:6px;padding:3px 10px;cursor:pointer;display:none;" title="Re-run AI detection">✦ Re-detect</button>
+        </div>
+        <div class="ai-status" id="ai-status">
+          <span class="ai-spin">↻</span> AI is detecting course &amp; module…
         </div>
         <input type="text" id="course-input" placeholder="e.g. Agentic AI, System Design…" autocomplete="off" list="course-suggestions" />
         <datalist id="course-suggestions"></datalist>
@@ -364,9 +382,8 @@
 
       <div class="field">
         <label>Module <span style="color:var(--muted);font-weight:400;">(optional)</span></label>
-        <input type="text" id="module-input" placeholder="e.g. Module 1, Week 2…" autocomplete="off" list="module-suggestions" />
+        <input type="text" id="module-input" placeholder="AI will suggest, or type your own…" autocomplete="off" list="module-suggestions" />
         <datalist id="module-suggestions"></datalist>
-        <span class="hint">Each photo saves as a separate note in this module.</span>
       </div>
 
       <div class="field">
@@ -490,6 +507,7 @@
     document.getElementById('course-input').addEventListener('input', updateModuleSuggestions);
 
     // ─── Add files to queue ───
+    let _detectTimer = null;
     function addFiles(fileList) {
       const remaining = MAX_PHOTOS - queue.length;
       const toAdd = Array.from(fileList).slice(0, remaining);
@@ -499,6 +517,12 @@
       });
       renderStrip();
       checkReady();
+      // Auto-detect course+module from images (debounced 600ms so rapid adds batch together)
+      const hasImages = queue.some(i => !i.isDoc);
+      if (hasImages) {
+        clearTimeout(_detectTimer);
+        _detectTimer = setTimeout(() => autoDetectPlacement(false), 600);
+      }
     }
 
     // ─── Render thumbnail strip ───
@@ -559,45 +583,87 @@
       e.target.value = '';
     });
 
+    let _detecting = false;
     function checkReady() {
-      const course = document.getElementById('course-input').value.trim();
-      document.getElementById('upload-btn').disabled = !(queue.length > 0 && course);
-      // Show auto-detect button only when there are images in the queue
+      // Enable upload as long as files are present — course can be filled by AI
+      document.getElementById('upload-btn').disabled = !(queue.length > 0 && !_detecting);
       const hasImages = queue.some(i => !i.isDoc);
       document.getElementById('auto-detect-btn').style.display = hasImages ? '' : 'none';
     }
-    document.getElementById('course-input').addEventListener('input', checkReady);
+    document.getElementById('course-input').addEventListener('input', () => {
+      updateModuleSuggestions();
+      checkReady();
+    });
 
-    async function autoDetectPlacement() {
-      const btn = document.getElementById('auto-detect-btn');
+    async function autoDetectPlacement(manual = false) {
       const hasImages = queue.some(i => !i.isDoc);
-      if (!hasImages) return;
-      btn.textContent = '…'; btn.disabled = true;
+      if (!hasImages || _detecting) return;
+      _detecting = true;
+
+      const btn = document.getElementById('auto-detect-btn');
+      const statusEl = document.getElementById('ai-status');
+      const courseIn = document.getElementById('course-input');
+      const moduleIn = document.getElementById('module-input');
+
+      statusEl.classList.add('show');
+      if (manual) { btn.textContent = '…'; btn.disabled = true; }
+      checkReady();
+
       try {
         const form = new FormData();
         queue.filter(i => !i.isDoc).slice(0, 3).forEach(i => form.append('files', i.file));
         const res = await fetch('/api/suggest-placement', { method: 'POST', body: form });
         const data = await res.json();
         if (data.course) {
-          document.getElementById('course-input').value = data.course;
-          document.getElementById('course-input').dispatchEvent(new Event('input')); // trigger module hints
-          if (data.module) document.getElementById('module-input').value = data.module;
+          // Only fill if user hasn't already typed something
+          if (!courseIn.value.trim()) {
+            courseIn.value = data.course;
+            courseIn.classList.add('ai-filled');
+            courseIn.dispatchEvent(new Event('input'));
+          }
+          if (data.module && !moduleIn.value.trim()) {
+            moduleIn.value = data.module;
+            moduleIn.classList.add('ai-filled');
+          }
         }
-        btn.textContent = data.course ? '✓ Done' : '✦ Auto-detect';
-        setTimeout(() => { btn.textContent = '✦ Auto-detect'; }, 2000);
+        if (manual) {
+          btn.textContent = data.course ? '✓ Done' : '✦ Re-detect';
+          setTimeout(() => { btn.textContent = '✦ Re-detect'; }, 2000);
+        }
       } catch {
-        btn.textContent = '✦ Auto-detect';
+        if (manual) btn.textContent = '✦ Re-detect';
+      } finally {
+        _detecting = false;
+        statusEl.classList.remove('show');
+        if (manual) btn.disabled = false;
+        checkReady();
       }
-      btn.disabled = false;
-      checkReady();
     }
+
+    // Clear ai-filled highlight when user manually edits
+    ['course-input', 'module-input'].forEach(id => {
+      document.getElementById(id).addEventListener('input', function() {
+        this.classList.remove('ai-filled');
+      });
+    });
 
     // ─── Upload ───
     async function doUpload() {
+      // If course is still empty, try one last auto-detect before proceeding
+      if (!document.getElementById('course-input').value.trim() && queue.some(i => !i.isDoc)) {
+        await autoDetectPlacement(false);
+      }
       const course = document.getElementById('course-input').value.trim();
       const module = document.getElementById('module-input').value.trim();
       const userNotes = document.getElementById('user-notes-input').value.trim();
-      if (!queue.length || !course) return;
+      if (!queue.length) return;
+      // If still no course after detection, prompt once
+      if (!course) {
+        document.getElementById('course-input').focus();
+        document.getElementById('course-input').style.borderColor = 'var(--danger)';
+        setTimeout(() => document.getElementById('course-input').style.borderColor = '', 2000);
+        return;
+      }
 
       const expectedNotes = Math.ceil(queue.length / groupSize);
 
@@ -689,9 +755,17 @@
     function resetForm() {
       queue.forEach(item => { if (!item.isDoc) URL.revokeObjectURL(item.objectUrl); });
       queue = [];
-      document.getElementById('course-input').value = '';
-      document.getElementById('module-input').value = '';
+      _detecting = false;
+      clearTimeout(_detectTimer);
+      ['course-input', 'module-input'].forEach(id => {
+        const el = document.getElementById(id);
+        el.value = '';
+        el.classList.remove('ai-filled');
+        el.style.borderColor = '';
+      });
       document.getElementById('user-notes-input').value = '';
+      document.getElementById('ai-status').classList.remove('show');
+      document.getElementById('auto-detect-btn').style.display = 'none';
       document.getElementById('success-state').classList.remove('show');
       document.getElementById('upload-btn').style.display = '';
       document.getElementById('upload-btn').disabled = true;
