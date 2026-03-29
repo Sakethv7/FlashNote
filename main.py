@@ -57,8 +57,11 @@ def start_server_and_watchers(port: int):
 
 
 def main():
-    import sys
-    port = find_free_port(settings.port)
+    import sys, argparse
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--port", type=int, default=None)
+    args, _ = parser.parse_known_args()
+    port = find_free_port(args.port if args.port else settings.port)
 
     start_server_and_watchers(port)
 
