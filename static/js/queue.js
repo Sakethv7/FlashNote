@@ -21,7 +21,7 @@ let desktopExpansionLevel = 'detailed'; // 'concise' | 'detailed' | 'comprehensi
 
 function setDesktopExpansion(level, btn) {
   desktopExpansionLevel = level;
-  document.querySelectorAll('[data-exp]').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.desktop-exp-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
 }
 
@@ -85,7 +85,7 @@ function closeUploadModal() {
   desktopGroupMode = 'fixed';
   desktopExpansionLevel = 'detailed';
   document.querySelectorAll('.desktop-group-btn').forEach((b, i) => b.classList.toggle('active', i === 0));
-  document.querySelectorAll('[data-exp]').forEach((b, i) => b.classList.toggle('active', i === 1));
+  document.querySelectorAll('.desktop-exp-btn').forEach((b, i) => b.classList.toggle('active', i === 1));
   const hint = document.getElementById('desktop-group-hint');
   if (hint) hint.textContent = desktopGroupHints[1];
   document.getElementById('desktop-file-input').value = '';
@@ -220,7 +220,7 @@ function renderDesktopThumbs() {
       wrap.style.cssText = 'position:relative;flex-shrink:0;width:68px;height:68px;';
       wrap.innerHTML = `
         <img src="${item.objectUrl}" style="width:68px;height:68px;object-fit:cover;border-radius:8px;border:1.5px solid var(--border);display:block;" />
-        <div style="position:absolute;top:-7px;right:-7px;width:18px;height:18px;border-radius:50%;background:#ef4444;color:#fff;border:2px solid var(--bg);font-size:10px;line-height:14px;text-align:center;cursor:pointer;font-weight:700;z-index:2;" data-rm>✕</div>
+        <div style="position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;background:#ef4444;color:#fff;border:2px solid var(--bg);font-size:10px;line-height:14px;text-align:center;cursor:pointer;font-weight:700;z-index:2;" data-rm>✕</div>
         <div style="position:absolute;bottom:3px;left:3px;background:rgba(0,0,0,0.5);color:#fff;font-size:9px;font-weight:600;border-radius:3px;padding:1px 4px;">${imgIdx+1}</div>`;
       wrap.querySelector('[data-rm]').addEventListener('click', e => {
         e.stopPropagation();
@@ -315,12 +315,13 @@ async function doDesktopUpload() {
   const progressWrap = document.getElementById('desktop-progress');
   const progressFill = document.getElementById('desktop-progress-fill');
   const progressLabel = document.getElementById('desktop-progress-label');
+  const imageCount = desktopQueue.filter(i => !i.isDoc).length;
+  const contextDocCount = desktopQueue.length - imageCount;
 
   btn.disabled = true;
   progressWrap.style.display = 'block';
-  const expectedNotes = Math.ceil(desktopQueue.length / desktopGroupSize);
   progressLabel.textContent = desktopGroupMode === 'auto'
-    ? `Uploading & analysing ${desktopQueue.length} image${desktopQueue.length > 1 ? 's' : ''} with AI…`
+    ? `Uploading & analysing ${imageCount} image${imageCount !== 1 ? 's' : ''} with AI…`
     : `Uploading ${desktopQueue.length} file${desktopQueue.length > 1 ? 's' : ''}…`;
   progressFill.style.width = '15%';
 
@@ -353,13 +354,16 @@ async function doDesktopUpload() {
       await pollAutoGrouping(data.batch_id, progressFill, progressLabel);
     } else if (data.status === 'skipped') {
       progressFill.style.width = '100%';
-      showToast(`⚠ ${data.message}`, 'info');
+      const invalidNote = data.unsupported?.length ? ` (${data.unsupported.length} unsupported skipped)` : '';
+      showToast(`⚠ ${data.message}${invalidNote}`, 'info');
     } else {
       const noteCount = data.count || 1;
       progressFill.style.width = '100%';
       await new Promise(r => setTimeout(r, 300));
       const dupNote = data.duplicates?.length ? ` (${data.duplicates.length} duplicate${data.duplicates.length > 1 ? 's' : ''} skipped)` : '';
-      showToast(`${noteCount} note${noteCount > 1 ? 's' : ''} queued for processing!${dupNote}`, 'success');
+      const invalidNote = data.unsupported?.length ? ` (${data.unsupported.length} unsupported skipped)` : '';
+      const contextNote = contextDocCount > 0 ? ` (+${contextDocCount} context doc${contextDocCount > 1 ? 's' : ''})` : '';
+      showToast(`${noteCount} note${noteCount > 1 ? 's' : ''} queued for processing!${dupNote}${invalidNote}${contextNote}`, 'success');
     }
 
     lastQueueData = null;

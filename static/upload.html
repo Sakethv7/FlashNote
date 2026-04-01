@@ -76,7 +76,7 @@
       display: flex;
       gap: 10px;
       overflow-x: auto;
-      padding-bottom: 4px;
+      padding: 8px 0 4px;
       scrollbar-width: none;
       min-height: 96px;
       align-items: center;
@@ -130,8 +130,8 @@
     .thumb-doc .doc-name { font-size: 9px; color: var(--muted); font-weight: 500; text-align: center; max-width: 76px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 4px; }
     .thumb-remove {
       position: absolute;
-      top: -8px;
-      right: -8px;
+      top: 4px;
+      right: 4px;
       width: 22px;
       height: 22px;
       border-radius: 50%;
@@ -251,6 +251,8 @@
       align-items: center;
       justify-content: center;
       gap: 8px;
+      position: sticky;
+      bottom: 16px;
     }
     .upload-btn:hover:not(:disabled) { background: var(--accent-hover); }
     .upload-btn:active:not(:disabled) { transform: scale(0.98); }
@@ -433,6 +435,13 @@
     let groupSize = 1;
     let groupMode = 'fixed'; // 'fixed' or 'auto'
 
+    function getQueueStats() {
+      const imageCount = queue.filter(item => !item.isDoc).length;
+      const docCount = queue.length - imageCount;
+      const noteCount = imageCount > 0 ? Math.ceil(imageCount / groupSize) : docCount;
+      return { imageCount, docCount, noteCount };
+    }
+
     function isDoc(file) {
       const ext = file.name.split('.').pop().toLowerCase();
       return ext === 'pdf' || ext === 'txt' || ext === 'rtf';
@@ -460,17 +469,21 @@
 
     function updateUploadLabel() {
       const n = queue.length;
-      if (n === 0) { document.getElementById('upload-btn-label').textContent = 'Upload & Generate Notes'; return; }
-      if (groupMode === 'auto') {
-        document.getElementById('upload-btn-label').textContent = 'Upload & Auto-Group 🤖';
+      if (n === 0) {
+        document.getElementById('upload-btn-label').textContent = 'Upload & Generate Notes';
+        document.getElementById('group-field').style.display = '';
+        return;
+      }
+      const { imageCount, docCount, noteCount } = getQueueStats();
+      if (groupMode === 'auto' && imageCount > 0) {
+        const contextSuffix = docCount > 0 ? ' (+context)' : '';
+        document.getElementById('upload-btn-label').textContent = `Upload & Auto-Group 🤖${contextSuffix}`;
       } else {
-        const notes = Math.ceil(n / groupSize);
         document.getElementById('upload-btn-label').textContent =
-          `Upload & Generate ${notes} Note${notes > 1 ? 's' : ''}`;
+          `Upload & Generate ${noteCount} Note${noteCount > 1 ? 's' : ''}`;
       }
       // Hide group size picker when all files are docs (PDFs/txt don't group)
-      const hasImages = queue.some(item => !item.isDoc);
-      document.getElementById('group-field').style.display = hasImages ? '' : 'none';
+      document.getElementById('group-field').style.display = imageCount > 0 ? '' : 'none';
     }
 
     // ─── Load course + module suggestions from library ───
@@ -585,7 +598,6 @@
 
     let _detecting = false;
     function checkReady() {
-      // Enable upload as long as files are present — course can be filled by AI
       document.getElementById('upload-btn').disabled = !(queue.length > 0 && !_detecting);
       const hasImages = queue.some(i => !i.isDoc);
       document.getElementById('auto-detect-btn').style.display = hasImages ? '' : 'none';
@@ -640,6 +652,32 @@
       }
     }
 
+    async function pollGroupStatus(batchId, fill, label) {
+      const maxWait = 120000;
+      const start = Date.now();
+      while (Date.now() - start < maxWait) {
+        await new Promise(r => setTimeout(r, 3000));
+        try {
+          const s = await fetch(`/api/upload/group-status/${batchId}`).then(r => r.json());
+          if (s.status === 'done') {
+            fill.style.width = '100%';
+            return { success: true, groups: s.groups || 0 };
+          }
+          if (s.status === 'error') {
+            label.textContent = `Auto-group failed: ${s.message}`;
+            return { success: false, error: s.message || 'Auto-group failed' };
+          }
+          if (s.status === 'processing') {
+            const pct = 40 + Math.min(((s.done || 0) / Math.max(s.groups || 1, 1)) * 55, 55);
+            fill.style.width = pct + '%';
+            label.textContent = `AI grouped ${s.groups || 0} notes, generating (${s.done || 0}/${s.groups || 0})…`;
+          }
+        } catch {}
+      }
+      label.textContent = 'Auto-grouping is taking longer than expected.';
+      return { success: true, groups: 0, pending: true };
+    }
+
     // Clear ai-filled highlight when user manually edits
     ['course-input', 'module-input'].forEach(id => {
       document.getElementById(id).addEventListener('input', function() {
@@ -665,7 +703,7 @@
         return;
       }
 
-      const expectedNotes = Math.ceil(queue.length / groupSize);
+      const { imageCount, docCount, noteCount: expectedNotes } = getQueueStats();
 
       // UI → loading
       document.getElementById('upload-btn').style.display = 'none';
@@ -679,8 +717,9 @@
 
       // Build per-group rows
       perPhoto.innerHTML = '';
-      for (let i = 0; i < queue.length; i += groupSize) {
-        const group = queue.slice(i, i + groupSize);
+      const imagesOnly = queue.filter(item => !item.isDoc);
+      for (let i = 0; i < imagesOnly.length; i += groupSize) {
+        const group = imagesOnly.slice(i, i + groupSize);
         const noteNum = Math.floor(i / groupSize) + 1;
         const row = document.createElement('div');
         row.className = 'photo-row';
@@ -694,10 +733,22 @@
           <span class="photo-row-status" id="status-${noteNum}">⏳</span>`;
         perPhoto.appendChild(row);
       }
+      if (!imagesOnly.length) {
+        queue.forEach((item, i) => {
+          const row = document.createElement('div');
+          row.className = 'photo-row';
+          row.id = `row-${i + 1}`;
+          row.innerHTML = `
+            <span style="font-size:24px;">${docIcon(item.file)}</span>
+            <span class="photo-row-name">${item.file.name}</span>
+            <span class="photo-row-status" id="status-${i + 1}">⏳</span>`;
+          perPhoto.appendChild(row);
+        });
+      }
 
       // Send all files in one request — backend groups by group_size or auto
       label.textContent = groupMode === 'auto'
-        ? `Uploading & analysing ${queue.length} image${queue.length > 1 ? 's' : ''} with AI…`
+        ? `Uploading & analysing ${imageCount} image${imageCount !== 1 ? 's' : ''} with AI…`
         : `Uploading ${queue.length} file${queue.length > 1 ? 's' : ''}…`;
       fill.style.width = '20%';
 
@@ -718,15 +769,36 @@
 
       let success = false;
       let noteCount = 0;
+      let uploadWarning = '';
+      let wasSkipped = false;
       try {
         const res = await fetch('/api/upload', { method: 'POST', body: form });
         clearInterval(ticker);
         if (!res.ok) { const e = await res.json(); throw new Error(e.detail || 'Upload failed'); }
         const data = await res.json();
-        noteCount = data.count || 1;
+        if (data.status === 'skipped') {
+          wasSkipped = true;
+          noteCount = 0;
+          fill.style.width = '100%';
+        } else if (data.status === 'grouping' && data.batch_id) {
+          label.textContent = `AI is grouping ${data.image_count} images into notes…`;
+          fill.style.width = '40%';
+          const grouped = await pollGroupStatus(data.batch_id, fill, label);
+          if (!grouped.success) throw new Error(grouped.error || 'Auto-group failed');
+          noteCount = grouped.groups || expectedNotes;
+        } else {
+          noteCount = data.count || expectedNotes || 1;
+          fill.style.width = '100%';
+        }
+        const duplicateCount = data.duplicates?.length || 0;
+        const unsupportedCount = data.unsupported?.length || 0;
+        if (duplicateCount || unsupportedCount) {
+          const parts = [];
+          if (duplicateCount) parts.push(`${duplicateCount} duplicate skipped`);
+          if (unsupportedCount) parts.push(`${unsupportedCount} unsupported skipped`);
+          uploadWarning = parts.join(', ');
+        }
         success = true;
-        fill.style.width = '100%';
-        // Mark all rows as queued
         document.querySelectorAll('[id^="status-"]').forEach(el => el.textContent = '✅');
       } catch (err) {
         clearInterval(ticker);
@@ -738,10 +810,15 @@
       document.getElementById('progress-wrap').classList.remove('show');
 
       if (success) {
-        document.getElementById('success-title').textContent =
-          noteCount === 1 ? 'Note queued!' : `${noteCount} notes queued!`;
+        document.getElementById('success-title').textContent = wasSkipped
+          ? 'Nothing new uploaded'
+          : (noteCount === 1 ? 'Note queued!' : `${noteCount} notes queued!`);
+        const contextNote = docCount > 0 && imageCount > 0 ? ` ${docCount} context file${docCount > 1 ? 's were' : ' was'} included.` : '';
+        const warningNote = uploadWarning ? ` ${uploadWarning}.` : '';
         document.getElementById('success-msg').textContent =
-          `${queue.length} file${queue.length > 1 ? 's' : ''} → ${noteCount} note${noteCount > 1 ? 's' : ''} being processed. Check FlashNote on your Mac to review.`;
+          wasSkipped
+            ? `No new notes were created.${warningNote || ' The selected files were already in your queue or were skipped.'}`
+            : `${queue.length} file${queue.length > 1 ? 's' : ''} → ${noteCount} note${noteCount > 1 ? 's' : ''} being processed.${contextNote}${warningNote} Check FlashNote on your Mac to review.`;
         document.getElementById('success-state').classList.add('show');
       } else {
         // Re-show form for retry
@@ -770,6 +847,7 @@
       document.getElementById('upload-btn').style.display = '';
       document.getElementById('upload-btn').disabled = true;
       document.getElementById('progress-fill').style.width = '0%';
+      document.getElementById('progress-label').textContent = 'Uploading…';
       document.getElementById('per-photo-progress').innerHTML = '';
       renderStrip();
     }

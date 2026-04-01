@@ -1785,6 +1785,9 @@ a:hover {
   box-shadow: var(--shadow-lg);
   width: 440px;
   max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
   animation: slideUp 0.2s ease;
 }
 
@@ -1807,6 +1810,8 @@ a:hover {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .drop-zone {
@@ -1866,6 +1871,27 @@ a:hover {
   transition: border-color 0.12s, background 0.12s;
 }
 .desktop-group-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
+.desktop-exp-btn {
+  flex: 1;
+  padding: 8px 4px;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  line-height: 1.4;
+  text-align: center;
+  transition: border-color 0.12s, background 0.12s;
+}
+.desktop-exp-btn.active {
   border-color: var(--accent);
   background: var(--accent-subtle);
   color: var(--accent);
@@ -2397,4 +2423,3 @@ a:hover {
 .lib-nav-btns { display: flex; gap: 8px; flex: 1; }
 .lib-nav-btn:disabled { opacity: 0.3; cursor: default; }
 .lib-edit-btn { font-size: 12px; color: var(--muted); margin-left: auto; }
-
