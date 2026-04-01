@@ -259,7 +259,7 @@ async def suggest_placement(files: list[UploadFile] = File(default=[])):
     try:
         for f in files[:3]:  # max 3 images for cost
             ext = (f.filename or "img").split(".")[-1].lower()
-            if ext not in ("jpg", "jpeg", "png", "gif", "webp"):
+            if ext not in ("jpg", "jpeg", "png", "gif", "webp", "heic", "heif"):
                 continue
             data = await f.read()
             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}")
@@ -356,6 +356,7 @@ async def upload_photo(
     context_texts: list[str] = []   # docs used as context, not standalone notes
     note_ids: list[str] = []
     duplicates: list[str] = []
+    unsupported: list[str] = []
 
     # Build set of existing image hashes to detect duplicates
     import hashlib as _hashlib
@@ -370,7 +371,8 @@ async def upload_photo(
     for upload in all_files:
         ext = Path(upload.filename or "photo.jpg").suffix.lower() or ".jpg"
         if ext not in supported_images and ext not in supported_docs:
-            raise HTTPException(status_code=400, detail=f"Unsupported file type: {ext}")
+            unsupported.append(upload.filename or f"unknown{ext}")
+            continue
 
         contents = await upload.read()
 
@@ -380,6 +382,7 @@ async def upload_photo(
             if img_hash in existing_hashes:
                 duplicates.append(upload.filename or "unknown")
                 continue  # skip duplicate
+            existing_hashes.add(img_hash)
 
         if ext in supported_docs:
             # Extract text and use as context for image note generation
@@ -459,10 +462,19 @@ async def upload_photo(
                 note_id = process_images(group, course, module_name=module_name.strip(), user_notes=combined_context)
                 note_ids.append(note_id)
 
-    if not note_ids and not duplicates:
+    if not note_ids and not duplicates and not unsupported:
         raise HTTPException(status_code=400, detail="No valid files processed")
-    if not note_ids and duplicates:
-        return {"status": "skipped", "duplicates": duplicates, "message": f"All {len(duplicates)} image(s) already exist in your queue."}
+    if not note_ids and duplicates and not unsupported:
+        return {"status": "skipped", "duplicates": duplicates, "unsupported": unsupported, "message": f"All {len(duplicates)} image(s) already exist in your queue."}
+    if not note_ids and unsupported and not duplicates:
+        raise HTTPException(status_code=400, detail="No supported files were provided")
+    if not note_ids and (duplicates or unsupported):
+        parts = []
+        if duplicates:
+            parts.append(f"{len(duplicates)} duplicate image(s)")
+        if unsupported:
+            parts.append(f"{len(unsupported)} unsupported file(s)")
+        return {"status": "skipped", "duplicates": duplicates, "unsupported": unsupported, "message": "Skipped " + " and ".join(parts) + "."}
 
     # Return batch_id for auto-grouping so UI can poll progress
     auto_batch = next((n.split(":")[1] for n in note_ids if n.startswith("auto-grouping:")), None)
@@ -473,13 +485,15 @@ async def upload_photo(
             "image_count": len(saved_image_paths),
             "message": f"AI is grouping {len(saved_image_paths)} images into notes…",
             "count": len(saved_image_paths),
+            "duplicates": duplicates,
+            "unsupported": unsupported,
         }
 
     dup_msg = f" ({len(duplicates)} duplicate(s) skipped)" if duplicates else ""
     # Legacy single-file callers expect {"status","note_id"}
     if len(note_ids) == 1:
-        return {"status": "queued", "note_id": note_ids[0], "duplicates": duplicates}
-    return {"status": "queued", "note_ids": note_ids, "count": len(note_ids), "duplicates": duplicates, "message": f"{len(note_ids)} note(s) queued{dup_msg}"}
+        return {"status": "queued", "note_id": note_ids[0], "duplicates": duplicates, "unsupported": unsupported}
+    return {"status": "queued", "note_ids": note_ids, "count": len(note_ids), "duplicates": duplicates, "unsupported": unsupported, "message": f"{len(note_ids)} note(s) queued{dup_msg}"}
 
 
 # In-memory status tracker for auto-grouping batches
